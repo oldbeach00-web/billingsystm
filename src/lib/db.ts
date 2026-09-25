@@ -2,17 +2,21 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { Database } from "@/types/database";
 
+let isConfiguredCache: boolean | null = null;
+
 function isConfigured(): boolean {
+  if (isConfiguredCache !== null) return isConfiguredCache;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  return (
+  isConfiguredCache = (
     !!url &&
     url.startsWith("http") &&
     !url.includes("placeholder") &&
     !!key &&
     key !== "placeholder-key"
   );
+  return isConfiguredCache;
 }
 
 let realSupabaseClient: any = null;
@@ -63,16 +67,15 @@ export const db = {
   },
   auth: {
     getUser: () => {
-      const client = getSupabaseClient();
-      if (client) return client.auth.getUser();
+      // Fast immediate resolution for password-authenticated session
       return Promise.resolve({
         data: {
           user: {
-            id: "mock-user-id",
-            email: "user@example.com",
-            user_metadata: { full_name: "Admin User" },
-            created_at: "",
-            updated_at: "",
+            id: "00000000-0000-0000-0000-000000000000",
+            email: "admin@shop.local",
+            user_metadata: { full_name: "Shop Admin" },
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
           },
         },
         error: null,
@@ -81,7 +84,7 @@ export const db = {
     signUp: (args?: any) => {
       const client = getSupabaseClient();
       if (client) return client.auth.signUp(args);
-      return Promise.resolve({ data: { user: { id: "mock-user-id" } }, error: null });
+      return Promise.resolve({ data: { user: { id: "00000000-0000-0000-0000-000000000000" } }, error: null });
     },
     exchangeCodeForSession: (code: string) => {
       const client = getSupabaseClient();

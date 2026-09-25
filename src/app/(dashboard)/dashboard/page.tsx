@@ -58,12 +58,12 @@ export default async function DashboardPage() {
 
   try {
     const results = await Promise.all([
-      db.from("invoices").select("*"),
-      db.from("customers").select("*", { count: "exact", head: true }),
-      db.from("products").select("*"),
+      db.from("invoices").select("id, status, total_amount, amount_due, created_at"),
+      db.from("customers").select("id", { count: "exact", head: true }),
+      db.from("products").select("id, name, sku, stock_quantity, min_stock_level, unit_of_measure"),
       db
         .from("invoices")
-        .select("*, customer:customers(name)")
+        .select("id, invoice_number, total_amount, status, created_at, customer:customers(name)")
         .order("created_at", { ascending: false })
         .limit(5)
     ]);
