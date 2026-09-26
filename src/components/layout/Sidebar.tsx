@@ -41,7 +41,7 @@ const navItems: NavItem[] = [
     icon: Users,
   },
   {
-    label: "Due Management",
+    label: "Balance Amount",
     href: "/dashboard/due",
     icon: CreditCard,
   },

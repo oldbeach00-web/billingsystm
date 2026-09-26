@@ -31,6 +31,7 @@ export default function DueManagementPage() {
   // Payment Modal State
   const [selectedInvoice, setSelectedInvoice] = useState<DueInvoice | null>(null);
   const [newPaymentInput, setNewPaymentInput] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "upi">("cash");
   const [paymentNotes, setPaymentNotes] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
@@ -47,7 +48,8 @@ export default function DueManagementPage() {
         .select("*, customer:customers(*)")
         .gt("amount_due", 0)
         .neq("status", "cancelled")
-        .order("created_at", { ascending: false }),
+        .order("created_at", { ascending: false })
+        .limit(500),
       db.from("customers").select("*").order("name"),
     ]);
 
@@ -74,6 +76,7 @@ export default function DueManagementPage() {
   const handleOpenPaymentModal = (inv: DueInvoice) => {
     setSelectedInvoice(inv);
     setNewPaymentInput(inv.amount_due ? inv.amount_due.toString() : "");
+    setPaymentMethod("cash");
     setPaymentNotes("");
     setModalError(null);
   };
@@ -129,7 +132,7 @@ export default function DueManagementPage() {
           invoice_id: selectedInvoice.id,
           payment_date: new Date().toISOString().split("T")[0],
           amount: newPayment,
-          payment_method: "cash",
+          payment_method: paymentMethod,
           status: "completed",
           notes: paymentNotes || `Due payment for Invoice #${selectedInvoice.invoice_number}`,
           created_by: user.id,
@@ -183,7 +186,7 @@ export default function DueManagementPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Due Management</h2>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Balance Amount</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Track outstanding invoice balances and record customer payments
           </p>
@@ -304,7 +307,7 @@ export default function DueManagementPage() {
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg transition-colors text-xs font-semibold shadow-sm"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        Record Payment
+                        Pay Balance
                       </button>
                     </td>
                   </tr>
@@ -394,6 +397,36 @@ export default function DueManagementPage() {
                     New Payment cannot exceed Old Balance ({formatCurrency(oldBalance)})
                   </p>
                 )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Payment Method *
+                </label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="payment_method"
+                      value="cash"
+                      checked={paymentMethod === "cash"}
+                      onChange={(e) => setPaymentMethod(e.target.value as "cash" | "upi")}
+                      className="text-indigo-600 focus:ring-indigo-500"
+                    />
+                    Cash
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="payment_method"
+                      value="upi"
+                      checked={paymentMethod === "upi"}
+                      onChange={(e) => setPaymentMethod(e.target.value as "cash" | "upi")}
+                      className="text-indigo-600 focus:ring-indigo-500"
+                    />
+                    UPI
+                  </label>
+                </div>
               </div>
 
               {/* Status Preview */}
