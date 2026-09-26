@@ -18,6 +18,9 @@ import {
 import { cn, formatCurrency, generateInvoiceNumber } from "@/lib/utils";
 import { BillPreview } from "@/components/invoices/BillPreview";
 
+// ─── Draft Persistence ────────────────────────────────────────────────────────
+const DRAFT_KEY = "new_invoice_draft_v1";
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface BillLineItem {
@@ -85,6 +88,10 @@ export default function NewInvoicePage() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // Draft persistence
+  const [draftRestored, setDraftRestored] = useState(false);
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Bill state
   const [invoiceNumber] = useState(generateInvoiceNumber());
   const [issueDate, setIssueDate] = useState(new Date().toISOString().split("T")[0]);
@@ -121,7 +128,7 @@ export default function NewInvoicePage() {
   // Preview modal
   const [showPreview, setShowPreview] = useState(false);
 
-  // ─── Load data ────────────────────────────────────────────────────────────
+  // ─── Load data + restore draft ────────────────────────────────────────────
 
   useEffect(() => {
     (async () => {
@@ -129,12 +136,101 @@ export default function NewInvoicePage() {
         db.from("products").select("*").eq("is_active", true).order("name"),
         db.from("customers").select("*").eq("is_active", true).order("name"),
       ]);
-      setProducts(prods || []);
-      setCustomers(custs || []);
+      const loadedProducts: Product[] = prods || [];
+      const loadedCustomers: Customer[] = custs || [];
+      setProducts(loadedProducts);
+      setCustomers(loadedCustomers);
+
+      // ── Restore draft from localStorage ──────────────────────────────────
+      try {
+        const raw = localStorage.getItem(DRAFT_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw) as {
+            customer: BillCustomer;
+            customerSearch: string;
+            lines: BillLineItem[];
+            globalDiscount: number;
+            issueDate: string;
+            dueDate: string;
+            notes: string;
+            paidAmountInput: string;
+          };
+
+          // Re-link product objects from the freshly loaded products list
+          // so computed fields and stock checks work correctly
+          const relinkedLines = saved.lines.map((l) => {
+            if (l.product_id) {
+              const freshProduct = loadedProducts.find((p) => p.id === l.product_id);
+              return freshProduct ? { ...l, product: freshProduct } : l;
+            }
+            return l;
+          });
+
+          setCustomer(saved.customer);
+          setCustomerSearch(saved.customerSearch || saved.customer.name);
+          setLines(relinkedLines.length > 0 ? relinkedLines : [newLineItem()]);
+          setGlobalDiscount(saved.globalDiscount ?? 0);
+          setIssueDate(saved.issueDate);
+          setDueDate(saved.dueDate);
+          setNotes(saved.notes ?? "");
+          setPaidAmountInput(saved.paidAmountInput ?? "0");
+          setDraftRestored(true);
+        }
+      } catch {
+        // Corrupt draft — silently ignore and start fresh
+        localStorage.removeItem(DRAFT_KEY);
+      }
+
       setIsLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ─── Auto-save draft to localStorage (debounced 600 ms) ──────────────────
+
+  useEffect(() => {
+    if (isLoading) return; // Don't save while initial data is loading
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(() => {
+      const draft = {
+        customer,
+        customerSearch,
+        lines,
+        globalDiscount,
+        issueDate,
+        dueDate,
+        notes,
+        paidAmountInput,
+      };
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      } catch {
+        // Storage quota exceeded — silently ignore
+      }
+    }, 600);
+    return () => {
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer, customerSearch, lines, globalDiscount, issueDate, dueDate, notes, paidAmountInput, isLoading]);
+
+  // ─── Clear draft helper ───────────────────────────────────────────────────
+
+  const clearDraft = () => {
+    localStorage.removeItem(DRAFT_KEY);
+    setCustomer({ id: null, name: "", phone: "", billing_address: "", gstin: "" });
+    setCustomerSearch("");
+    setLines([newLineItem()]);
+    setGlobalDiscount(0);
+    setIssueDate(new Date().toISOString().split("T")[0]);
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    setDueDate(d.toISOString().split("T")[0]);
+    setNotes("");
+    setPaidAmountInput("0");
+    setDraftRestored(false);
+    setError(null);
+  };
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -149,6 +245,7 @@ export default function NewInvoicePage() {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
+
 
   // ─── Computed totals & Stage 6 Payment Logic ─────────────────────────────
 
@@ -362,6 +459,7 @@ export default function NewInvoicePage() {
 
       if (!rpcErr && rpcRes) {
         // RPC execution succeeded atomically!
+        localStorage.removeItem(DRAFT_KEY);
         setSuccessMessage(`Invoice #${invoiceNumber} confirmed & created successfully!`);
         setTimeout(() => {
           router.push("/dashboard/invoices");
@@ -460,6 +558,7 @@ export default function NewInvoicePage() {
       }
 
       // 13. Return invoice number & redirect
+      localStorage.removeItem(DRAFT_KEY);
       setSuccessMessage(`Invoice #${invoiceNumber} created successfully!`);
       setTimeout(() => {
         router.push("/dashboard/invoices");
@@ -492,6 +591,15 @@ export default function NewInvoicePage() {
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">#{invoiceNumber}</p>
           </div>
           <div className="flex gap-3">
+            {draftRestored && (
+              <button
+                onClick={clearDraft}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-600 text-amber-700 dark:text-amber-300 text-sm font-medium rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors"
+              >
+                <X className="w-4 h-4" />
+                Clear Draft
+              </button>
+            )}
             <button
               onClick={() => {
                 if (!customer.name.trim() || lines.every((l) => !l.description.trim())) {
@@ -529,6 +637,18 @@ export default function NewInvoicePage() {
           </div>
         </div>
 
+        {draftRestored && (
+          <div className="p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-700 rounded-lg flex items-center justify-between text-sm">
+            <span>📋 Draft restored — your previous invoice data has been loaded.</span>
+            <button
+              onClick={clearDraft}
+              className="ml-4 text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 font-medium underline"
+            >
+              Clear Draft
+            </button>
+          </div>
+        )}
+
         {error && (
           <div className="p-4 bg-red-50 text-red-700 border border-red-200 rounded-lg flex items-center gap-2">
             <AlertCircle className="w-5 h-5 flex-shrink-0" />
@@ -542,6 +662,7 @@ export default function NewInvoicePage() {
             {successMessage}
           </div>
         )}
+
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* ── LEFT: Customer + Items ─────────────────────────────────── */}
