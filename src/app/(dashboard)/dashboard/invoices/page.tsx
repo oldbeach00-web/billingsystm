@@ -7,13 +7,12 @@ import {
   FileText,
   Plus,
   Loader2,
-  AlertCircle,
   Search,
   Printer,
-  Eye,
-  Filter,
   Calendar,
   X,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import Link from "next/link";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
@@ -26,20 +25,38 @@ type InvoiceWithDetails = Invoice & {
 };
 
 export default function InvoicesPage() {
-  
-
   // Data states
   const [invoices, setInvoices] = useState<InvoiceWithDetails[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Stage 8 Filter states
+  // Pagination
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const pageSize = 50;
+
+  // Search & Filter states
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [customerFilter, setCustomerFilter] = useState("");
+  const [debouncedCustomerFilter, setDebouncedCustomerFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [customerFilter, setCustomerFilter] = useState("all");
   const [startDateFilter, setStartDateFilter] = useState("");
   const [endDateFilter, setEndDateFilter] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setDebouncedCustomerFilter(customerFilter);
+      setPage(1);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [search, customerFilter]);
+
+  // Reset page when other filters change
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, startDateFilter, endDateFilter]);
 
   // Modal / Print state
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceWithDetails | null>(null);
@@ -50,24 +67,57 @@ export default function InvoicesPage() {
     setError(null);
 
     try {
-      // Fetch invoices and customers
-      const [{ data: invs, error: invErr }, { data: custs }] = await Promise.all([
-        db.from("invoices").select("*, customer:customers(*)").order("created_at", { ascending: false }),
-        db.from("customers").select("*").order("name"),
-      ]);
+      let query = db.from("invoices").select("*, customer:customers(*)", { count: "exact" });
 
-      if (invErr) {
-        setError(invErr.message);
-      } else {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const mapped = (invs as any[])?.map((inv) => ({
-          ...inv,
-          customer: Array.isArray(inv.customer) ? inv.customer[0] : inv.customer,
-        })) || [];
-        setInvoices(mapped);
+      if (statusFilter !== "all") {
+        query = query.eq("status", statusFilter);
+      }
+      if (startDateFilter) {
+        query = query.gte("issue_date", startDateFilter);
+      }
+      if (endDateFilter) {
+        query = query.lte("issue_date", endDateFilter);
       }
 
-      if (custs) setCustomers(custs);
+      // Handle dedicated customer filter
+      if (debouncedCustomerFilter) {
+        const { data: matchedCustomers } = await db.from("customers").select("id").ilike("name", `%${debouncedCustomerFilter}%`);
+        const cIds = matchedCustomers?.map((c: any) => c.id) || [];
+        if (cIds.length > 0) {
+          query = query.in("customer_id", cIds);
+        } else {
+          // Force empty result if customer name not found
+          query = query.eq("id", "00000000-0000-0000-0000-000000000000");
+        }
+      }
+
+      // Handle search across invoices and customers safely
+      if (debouncedSearch) {
+        const { data: matchedCustomers } = await db.from("customers").select("id").or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%`);
+        const cIds = matchedCustomers?.map((c: any) => c.id) || [];
+        
+        if (cIds.length > 0) {
+          query = query.or(`invoice_number.ilike.%${debouncedSearch}%,customer_id.in.(${cIds.join(',')})`);
+        } else {
+          query = query.ilike("invoice_number", `%${debouncedSearch}%`);
+        }
+      }
+
+      query = query.order("created_at", { ascending: false }).range((page - 1) * pageSize, page * pageSize - 1);
+
+      const { data: invs, count, error: invErr } = await query;
+
+      if (invErr) throw new Error(invErr.message);
+
+      setTotalCount(count || 0);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mapped = (invs as any[])?.map((inv) => ({
+        ...inv,
+        customer: Array.isArray(inv.customer) ? inv.customer[0] : inv.customer,
+      })) || [];
+      
+      setInvoices(mapped);
     } catch (err: any) {
       setError(err?.message || "Failed to fetch database records");
     } finally {
@@ -78,7 +128,7 @@ export default function InvoicesPage() {
   useEffect(() => {
     fetchInvoices();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [page, debouncedSearch, statusFilter, startDateFilter, endDateFilter]);
 
   // Open A4 Invoice Modal for View / Print / Reprint
   const handleOpenPrintModal = async (invoiceId: string) => {
@@ -94,6 +144,7 @@ export default function InvoicesPage() {
       const mapped: InvoiceWithDetails = {
         ...invData,
         customer: Array.isArray(invData.customer) ? invData.customer[0] : invData.customer,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         items: (invData.items as any[])?.map((it) => ({
           ...it,
           product: Array.isArray(it.product) ? it.product[0] : it.product,
@@ -104,44 +155,17 @@ export default function InvoicesPage() {
     setIsFetchingDetail(false);
   };
 
-  // Stage 8 Filter Logic
-  const filtered = invoices.filter((inv) => {
-    // 1. Search filter (Invoice #, Customer Name, Customer Phone)
-    const matchesSearch =
-      inv.invoice_number.toLowerCase().includes(search.toLowerCase()) ||
-      (inv.customer?.name || "").toLowerCase().includes(search.toLowerCase()) ||
-      (inv.customer?.phone || "").includes(search);
-
-    // 2. Status filter
-    const matchesStatus =
-      statusFilter === "all" ? true : inv.status === statusFilter;
-
-    // 3. Customer filter
-    const matchesCustomer =
-      customerFilter === "all" ? true : inv.customer_id === customerFilter;
-
-    // 4. Date filter (Start Date & End Date)
-    let matchesDate = true;
-    if (startDateFilter) {
-      matchesDate = matchesDate && inv.issue_date >= startDateFilter;
-    }
-    if (endDateFilter) {
-      matchesDate = matchesDate && inv.issue_date <= endDateFilter;
-    }
-
-    return matchesSearch && matchesStatus && matchesCustomer && matchesDate;
-  });
-
   const clearFilters = () => {
     setSearch("");
+    setCustomerFilter("");
     setStatusFilter("all");
-    setCustomerFilter("all");
     setStartDateFilter("");
     setEndDateFilter("");
+    setPage(1);
   };
 
-  const hasActiveFilters =
-    search || statusFilter !== "all" || customerFilter !== "all" || startDateFilter || endDateFilter;
+  const hasActiveFilters = search || customerFilter || statusFilter !== "all" || startDateFilter || endDateFilter;
+  const totalPages = Math.ceil(totalCount / pageSize) || 1;
 
   return (
     <div className="space-y-6">
@@ -164,7 +188,7 @@ export default function InvoicesPage() {
 
       <DatabaseStatusBanner error={error} />
 
-      {/* Stage 8 Filter Controls Bar */}
+      {/* Filter Controls Bar */}
       <div className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {/* Search Input */}
@@ -172,10 +196,21 @@ export default function InvoicesPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by Invoice #, Customer or Phone..."
+              placeholder="Search by Invoice #, Customer Name, or Phone..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          {/* Customer Filter */}
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Filter by Customer..."
+              value={customerFilter}
+              onChange={(e) => setCustomerFilter(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
 
@@ -192,22 +227,6 @@ export default function InvoicesPage() {
               <option value="due">Due / Sent</option>
               <option value="draft">Draft</option>
               <option value="cancelled">Cancelled</option>
-            </select>
-          </div>
-
-          {/* Customer Filter */}
-          <div className="relative">
-            <select
-              value={customerFilter}
-              onChange={(e) => setCustomerFilter(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              <option value="all">All Customers</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
             </select>
           </div>
 
@@ -259,93 +278,118 @@ export default function InvoicesPage() {
           <FileText className="w-12 h-12 text-gray-300 dark:text-gray-600 mb-4" />
           <h3 className="text-base font-medium text-gray-900 dark:text-white mb-1">No invoices found</h3>
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-            Create your first invoice to view history.
+            {hasActiveFilters ? "Try adjusting your filter criteria." : "Create your first invoice to view history."}
           </p>
-          <Link
-            href="/dashboard/invoices/new"
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            New Invoice
-          </Link>
+          {!hasActiveFilters && (
+            <Link
+              href="/dashboard/invoices/new"
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              New Invoice
+            </Link>
+          )}
         </div>
       ) : (
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-            <thead className="bg-gray-50 dark:bg-gray-900/50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Invoice #</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Customer</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Paid</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Balance</th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              {filtered.map((inv) => {
-                const status = inv.status || "due";
-                const totalAmt = Number(inv.total_amount || 0);
-                const paidAmt = Number(inv.amount_paid || 0);
-                const balanceAmt = Number(inv.amount_due ?? Math.max(0, totalAmt - paidAmt));
-
-                return (
-                  <tr key={inv.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-indigo-600 dark:text-indigo-400">
-                      {inv.invoice_number}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
-                      {inv.customer?.name || "Walk-in Customer"}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {formatDate(inv.issue_date)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-gray-900 dark:text-white">
-                      {formatCurrency(totalAmt)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                      {formatCurrency(paidAmt)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-amber-600 dark:text-amber-400">
-                      {formatCurrency(balanceAmt)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <span
-                        className={cn(
-                          "inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider",
-                          status === "paid" && "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
-                          status === "partially_paid" && "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
-                          (status === "due" || status === "sent") && "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-                          status === "draft" && "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
-                        )}
-                      >
-                        {status === "paid" ? "PAID" : status === "partially_paid" ? "PARTIALLY PAID" : status === "draft" ? "DRAFT" : "DUE"}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button
-                        onClick={() => handleOpenPrintModal(inv.id)}
-                        disabled={isFetchingDetail}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg transition-colors text-xs font-semibold"
-                      >
-                        <Printer className="w-3.5 h-3.5" />
-                        Print / Reprint
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-              {filtered.length === 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <thead className="bg-gray-50 dark:bg-gray-900/50">
                 <tr>
-                  <td colSpan={8} className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                    No invoices match your filter criteria.
-                  </td>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Invoice #</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Customer</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Paid</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Balance</th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                {invoices.map((inv) => {
+                  const status = inv.status || "due";
+                  const totalAmt = Number(inv.total_amount || 0);
+                  const paidAmt = Number(inv.amount_paid || 0);
+                  const balanceAmt = Number(inv.amount_due ?? Math.max(0, totalAmt - paidAmt));
+
+                  return (
+                    <tr key={inv.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-indigo-600 dark:text-indigo-400">
+                        {inv.invoice_number}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                        {inv.customer?.name || "Walk-in Customer"}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                        {formatDate(inv.issue_date)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-gray-900 dark:text-white">
+                        {formatCurrency(totalAmt)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                        {formatCurrency(paidAmt)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-amber-600 dark:text-amber-400">
+                        {formatCurrency(balanceAmt)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <span
+                          className={cn(
+                            "inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider",
+                            status === "paid" && "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+                            status === "partially_paid" && "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+                            (status === "due" || status === "sent") && "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+                            status === "draft" && "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+                          )}
+                        >
+                          {status === "paid" ? "PAID" : status === "partially_paid" ? "PARTIALLY PAID" : status === "draft" ? "DRAFT" : "DUE"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <button
+                          onClick={() => handleOpenPrintModal(inv.id)}
+                          disabled={isFetchingDetail}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg transition-colors text-xs font-semibold"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          Print / Reprint
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 gap-4">
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                Showing <span className="font-medium">{(page - 1) * pageSize + 1}</span> to <span className="font-medium">{Math.min(page * pageSize, totalCount)}</span> of <span className="font-medium">{totalCount}</span> invoices
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" /> Previous
+                </button>
+                <span className="text-sm text-gray-600 dark:text-gray-400 px-2 font-medium">
+                  Page {page} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

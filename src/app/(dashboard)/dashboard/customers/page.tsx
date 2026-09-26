@@ -13,7 +13,8 @@ import {
   AlertCircle,
   X,
   CheckCircle,
-  FileText,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 
@@ -29,8 +30,20 @@ export default function CustomersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Search
+  // Pagination & Search
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const pageSize = 50;
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1); // reset to page 1 on new search
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -50,23 +63,44 @@ export default function CustomersPage() {
     setIsLoading(true);
     setError(null);
 
-    // Fetch customers and invoices for total aggregation
-    const [{ data: custData, error: custErr }, { data: invData }] = await Promise.all([
-      db.from("customers").select("*").order("name"),
-      db.from("invoices").select("customer_id, total_amount, amount_paid, amount_due, status"),
-    ]);
+    try {
+      let query = db.from("customers").select("*", { count: "exact" });
+      
+      if (debouncedSearch) {
+        query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%,gstin.ilike.%${debouncedSearch}%,billing_address.ilike.%${debouncedSearch}%`);
+      }
 
-    if (custErr) {
-      setError(custErr.message);
-    } else {
+      query = query.order("name").range((page - 1) * pageSize, page * pageSize - 1);
+
+      const { data: custData, count, error: custErr } = await query;
+
+      if (custErr) throw new Error(custErr.message);
+
+      setTotalCount(count || 0);
+
+      const customersList = (custData as Customer[]) || [];
+      if (customersList.length === 0) {
+        setCustomers([]);
+        return;
+      }
+
+      // Fetch invoices only for the current page of customers to calculate balances
+      const customerIds = customersList.map(c => c.id);
+      const { data: invData, error: invErr } = await db.from("invoices")
+        .select("customer_id, total_amount, amount_paid, amount_due, status")
+        .in("customer_id", customerIds)
+        .neq("status", "cancelled");
+
+      if (invErr) throw new Error(invErr.message);
+
       const invs = (invData as Invoice[]) || [];
 
       // Calculate totals per customer
-      const mapped: CustomerWithTotals[] = (custData as Customer[]).map((c) => {
-        const custInvs = invs.filter((inv) => inv.customer_id === c.id && inv.status !== "cancelled");
+      const mapped: CustomerWithTotals[] = customersList.map((c) => {
+        const custInvs = invs.filter((inv) => inv.customer_id === c.id);
         const total_purchases = custInvs.reduce((sum, inv) => sum + Number(inv.total_amount || 0), 0);
         const total_paid = custInvs.reduce((sum, inv) => sum + Number(inv.amount_paid || 0), 0);
-        const total_balance = custInvs.reduce((sum, inv) => sum + Number(inv.amount_due ?? Math.max(0, inv.total_amount - inv.amount_paid)), 0);
+        const total_balance = custInvs.reduce((sum, inv) => sum + Number(inv.amount_due ?? Math.max(0, (inv.total_amount || 0) - (inv.amount_paid || 0))), 0);
 
         return {
           ...c,
@@ -77,15 +111,17 @@ export default function CustomersPage() {
       });
 
       setCustomers(mapped);
+    } catch (err: any) {
+      setError(err.message || "An error occurred while fetching customers.");
+    } finally {
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   };
 
   useEffect(() => {
     fetchCustomers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [page, debouncedSearch]);
 
   const handleOpenModal = (customer?: Customer) => {
     setModalError(null);
@@ -171,13 +207,7 @@ export default function CustomersPage() {
     }
   };
 
-  const filtered = customers.filter(
-    (c) =>
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      (c.phone || "").includes(search) ||
-      (c.gstin || "").toLowerCase().includes(search.toLowerCase()) ||
-      (c.billing_address || "").toLowerCase().includes(search.toLowerCase())
-  );
+  const totalPages = Math.ceil(totalCount / pageSize) || 1;
 
   return (
     <div className="space-y-6">
@@ -225,84 +255,109 @@ export default function CustomersPage() {
       ) : customers.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
           <Users className="w-12 h-12 text-gray-300 dark:text-gray-600 mb-4" />
-          <h3 className="text-base font-medium text-gray-900 dark:text-white mb-1">No customers yet</h3>
+          <h3 className="text-base font-medium text-gray-900 dark:text-white mb-1">No customers found</h3>
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-            Add your first customer to track purchases and balances.
+            {debouncedSearch ? "Try adjusting your search query." : "Add your first customer to track purchases and balances."}
           </p>
-          <button
-            onClick={() => handleOpenModal()}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Add Customer
-          </button>
+          {!debouncedSearch && (
+            <button
+              onClick={() => handleOpenModal()}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Add Customer
+            </button>
+          )}
         </div>
       ) : (
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-            <thead className="bg-gray-50 dark:bg-gray-900/50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Customer Name</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Phone</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Address</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">GSTIN</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Purchases</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Paid</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Balance</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              {filtered.map((c) => (
-                <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 dark:text-white">
-                    {c.name}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                    {c.phone || "—"}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 max-w-xs truncate">
-                    {c.billing_address || "—"}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                    {c.gstin || "—"}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-gray-900 dark:text-white">
-                    {formatCurrency(c.total_purchases)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                    {formatCurrency(c.total_paid)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-amber-600 dark:text-amber-400">
-                    {formatCurrency(c.total_balance)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button
-                      onClick={() => handleOpenModal(c)}
-                      className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300 mr-3 inline-block"
-                      title="Edit Customer"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(c.id, c.name)}
-                      className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 inline-block"
-                      title="Delete Customer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <thead className="bg-gray-50 dark:bg-gray-900/50">
                 <tr>
-                  <td colSpan={8} className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                    No customers match your search criteria.
-                  </td>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Customer Name</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Phone</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Address</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">GSTIN</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Purchases</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Paid</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Balance</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                {customers.map((c) => (
+                  <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 dark:text-white">
+                      {c.name}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                      {c.phone || "—"}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 max-w-xs truncate">
+                      {c.billing_address || "—"}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                      {c.gstin || "—"}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-gray-900 dark:text-white">
+                      {formatCurrency(c.total_purchases)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                      {formatCurrency(c.total_paid)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-amber-600 dark:text-amber-400">
+                      {formatCurrency(c.total_balance)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      <button
+                        onClick={() => handleOpenModal(c)}
+                        className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300 mr-3 inline-block"
+                        title="Edit Customer"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(c.id, c.name)}
+                        className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 inline-block"
+                        title="Delete Customer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 gap-4">
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                Showing <span className="font-medium">{(page - 1) * pageSize + 1}</span> to <span className="font-medium">{Math.min(page * pageSize, totalCount)}</span> of <span className="font-medium">{totalCount}</span> customers
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" /> Previous
+                </button>
+                <span className="text-sm text-gray-600 dark:text-gray-400 px-2 font-medium">
+                  Page {page} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
