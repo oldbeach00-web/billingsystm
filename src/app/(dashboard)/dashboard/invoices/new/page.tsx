@@ -133,8 +133,8 @@ export default function NewInvoicePage() {
   useEffect(() => {
     (async () => {
       const [{ data: prods }, { data: custs }] = await Promise.all([
-        db.from("products").select("*").eq("is_active", true).order("name"),
-        db.from("customers").select("*").eq("is_active", true).order("name"),
+        db.from("products").select("*").eq("is_active", true).order("name").limit(500),
+        db.from("customers").select("*").eq("is_active", true).order("name").limit(500),
       ]);
       const loadedProducts: Product[] = prods || [];
       const loadedCustomers: Customer[] = custs || [];
@@ -352,6 +352,17 @@ export default function NewInvoicePage() {
     const validLines = lines.filter((l) => l.description.trim());
     if (validLines.length === 0) {
       setError("Please add at least one valid item to the bill.");
+      return;
+    }
+
+    const hasInvalidLine = validLines.some(l => Number(l.quantity) <= 0 || Number(l.unit_price) < 0);
+    if (hasInvalidLine) {
+      setError("Quantity must be strictly greater than 0, and prices cannot be negative.");
+      return;
+    }
+
+    if (grandTotal < 0) {
+      setError("Grand Total cannot be negative.");
       return;
     }
 

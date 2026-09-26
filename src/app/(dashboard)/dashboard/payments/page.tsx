@@ -26,6 +26,7 @@ export default function PaymentsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<(Invoice & { customer?: Customer }) | null>(null);
   const [paidAmountInput, setPaidAmountInput] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "upi">("cash");
   const [paymentNotes, setPaymentNotes] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
@@ -38,14 +39,16 @@ export default function PaymentsPage() {
     const { data: pymts, error: pErr } = await db
       .from("payments")
       .select("*, invoice:invoices(*, customer:customers(*))")
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(500);
 
     // Fetch invoices with balance > 0 for recording new payments
     const { data: invs, error: iErr } = await db
       .from("invoices")
       .select("*, customer:customers(*)")
       .gt("amount_due", 0)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(200);
 
     if (pErr) {
       setError(pErr.message);
@@ -94,6 +97,7 @@ export default function PaymentsPage() {
   const handleOpenModal = (invoice?: Invoice & { customer?: Customer }) => {
     setSelectedInvoice(invoice || null);
     setPaidAmountInput(invoice ? invoice.amount_due.toString() : "");
+    setPaymentMethod("cash");
     setPaymentNotes("");
     setModalError(null);
     setIsModalOpen(true);
@@ -160,7 +164,7 @@ export default function PaymentsPage() {
           invoice_id: selectedInvoice.id,
           payment_date: new Date().toISOString().split("T")[0],
           amount: enteredPaidAmount,
-          payment_method: "cash",
+          payment_method: paymentMethod,
           status: "completed",
           notes: paymentNotes || null,
           created_by: user.id,
@@ -371,6 +375,36 @@ export default function PaymentsPage() {
                   </div>
                 </div>
               )}
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Payment Method *
+                </label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="pay_method"
+                      value="cash"
+                      checked={paymentMethod === "cash"}
+                      onChange={(e) => setPaymentMethod(e.target.value as "cash" | "upi")}
+                      className="text-indigo-600 focus:ring-indigo-500"
+                    />
+                    Cash
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="pay_method"
+                      value="upi"
+                      checked={paymentMethod === "upi"}
+                      onChange={(e) => setPaymentMethod(e.target.value as "cash" | "upi")}
+                      className="text-indigo-600 focus:ring-indigo-500"
+                    />
+                    UPI
+                  </label>
+                </div>
+              </div>
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">

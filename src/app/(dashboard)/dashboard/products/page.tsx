@@ -30,7 +30,8 @@ export default function ProductsPage() {
     const { data: prods, error: prodsError } = await db
       .from("products")
       .select("*, category:categories(*)")
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(500);
 
     if (prodsError) {
       setError(prodsError.message);

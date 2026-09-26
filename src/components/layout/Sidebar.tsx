@@ -192,7 +192,7 @@ export function Sidebar({
       {!isCollapsed && (
         <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
           <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
-            Stage 1 — Foundation
+            BillManager v1.0 — Production
           </p>
         </div>
       )}

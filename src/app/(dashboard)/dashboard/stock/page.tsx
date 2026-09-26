@@ -49,7 +49,8 @@ export default function StockPage() {
       const { data, error: fetchError } = await db
         .from("products")
         .select("*, category:categories(*)")
-        .order("name");
+        .order("name")
+        .limit(500);
       
       if (fetchError) setError(fetchError.message);
       else {
