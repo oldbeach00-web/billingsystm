@@ -145,7 +145,6 @@ export default function DueManagementPage() {
       const { error: iErr } = await (db.from("invoices") as any)
         .update({
           amount_paid: updatedTotalPaid,
-          amount_due: remainingBalance,
           status: computedStatus,
         })
         .eq("id", selectedInvoice.id);

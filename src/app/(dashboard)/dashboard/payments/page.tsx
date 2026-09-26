@@ -173,7 +173,6 @@ export default function PaymentsPage() {
       const { error: iErr } = await (db.from("invoices") as any)
         .update({
           amount_paid: newTotalPaid,
-          amount_due: newBalanceAmount,
           status: computedNewStatus,
         })
         .eq("id", selectedInvoice.id);

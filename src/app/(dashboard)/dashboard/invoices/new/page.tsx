@@ -482,7 +482,6 @@ export default function NewInvoicePage() {
           discount_amount: globalDiscountAmt,
           total_amount: grandTotal,
           amount_paid: paidAmount,
-          amount_due: balanceAmount,
           notes: notes || null,
           created_by: user.id,
         }])
