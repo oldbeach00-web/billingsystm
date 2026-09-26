@@ -66,8 +66,20 @@ export const db = {
     return createChainable();
   },
   auth: {
-    getUser: () => {
-      // Fast immediate resolution for password-authenticated session
+    getUser: async () => {
+      // Try real Supabase Auth session first (set during login via server action)
+      const client = getSupabaseClient();
+      if (client) {
+        try {
+          const result = await client.auth.getUser();
+          if (result.data?.user) {
+            return result;
+          }
+        } catch {
+          // Fall through to mock
+        }
+      }
+      // Fallback mock user — active when Supabase Auth session is not yet established
       return Promise.resolve({
         data: {
           user: {
