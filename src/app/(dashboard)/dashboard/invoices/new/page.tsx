@@ -232,11 +232,14 @@ export default function NewInvoicePage() {
     []
   );
 
-  const filteredProducts = products.filter(
-    (p) =>
-      p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
-      p.sku.toLowerCase().includes(productSearch.toLowerCase())
-  );
+  const filteredProducts =
+    productSearch.trim().length >= 2
+      ? products.filter(
+          (p) =>
+            p.name.toLowerCase().includes(productSearch.trim().toLowerCase()) ||
+            p.sku.toLowerCase().includes(productSearch.trim().toLowerCase())
+        )
+      : [];
 
   // ─── STAGE 7: CONFIRM INVOICE & STOCK MANAGEMENT ──────────────────────────
 
@@ -678,7 +681,7 @@ export default function NewInvoicePage() {
                     placeholder="Search and add products by name or SKU..."
                   />
                 </div>
-                {showProductDropdown && productSearch && (
+                {showProductDropdown && productSearch.trim().length >= 2 && (
                   <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-20 max-h-64 overflow-y-auto">
                     {filteredProducts.length > 0 ? (
                       filteredProducts.map((p) => (
