@@ -133,8 +133,8 @@ export default function NewInvoicePage() {
   useEffect(() => {
     (async () => {
       const [{ data: prods }, { data: custs }] = await Promise.all([
-        db.from("products").select("*").eq("is_active", true).order("name").limit(500),
-        db.from("customers").select("*").eq("is_active", true).order("name").limit(500),
+        db.from("products").select("*").eq("is_active", true).order("name").limit(1000),
+        db.from("customers").select("*").eq("is_active", true).order("name").limit(1000),
       ]);
       const loadedProducts: Product[] = prods || [];
       const loadedCustomers: Customer[] = custs || [];

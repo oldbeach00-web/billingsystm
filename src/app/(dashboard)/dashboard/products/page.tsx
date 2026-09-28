@@ -31,7 +31,7 @@ export default function ProductsPage() {
       .from("products")
       .select("*, category:categories(*)")
       .order("created_at", { ascending: false })
-      .limit(500);
+      .limit(1000);
 
     if (prodsError) {
       setError(prodsError.message);

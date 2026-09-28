@@ -50,7 +50,7 @@ export default function StockPage() {
         .from("products")
         .select("*, category:categories(*)")
         .order("name")
-        .limit(500);
+        .limit(1000);
       
       if (fetchError) setError(fetchError.message);
       else {
