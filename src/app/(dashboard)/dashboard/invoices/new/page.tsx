@@ -329,12 +329,13 @@ export default function NewInvoicePage() {
     []
   );
 
+  const searchLower = productSearch.trim().toLowerCase();
   const filteredProducts =
-    productSearch.trim().length >= 2
+    searchLower.length >= 2
       ? products.filter(
           (p) =>
-            p.name.toLowerCase().includes(productSearch.trim().toLowerCase()) ||
-            p.sku.toLowerCase().includes(productSearch.trim().toLowerCase())
+            (p.name || "").toLowerCase().includes(searchLower) ||
+            (p.sku || "").toLowerCase().includes(searchLower)
         )
       : [];
 
