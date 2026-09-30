@@ -26,7 +26,7 @@ export default function GlobalError({
           Application Error
         </h2>
         <p className="text-gray-600 dark:text-gray-400 mb-8">
-          We encountered an unexpected system error. We've securely logged the issue. Please try refreshing the page or return to the login screen.
+          We encountered an unexpected system error. We&apos;ve securely logged the issue. Please try refreshing the page or return to the login screen.
         </p>
         
         <div className="flex flex-col sm:flex-row justify-center gap-3">

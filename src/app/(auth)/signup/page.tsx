@@ -24,7 +24,7 @@ export default function SignupPage() {
 
     try {
       
-      const { error: authError } = await (db.auth as any).signUp({
+      const { error: authError } = await (db.auth as { signUp: (opts: { email: string, password: string, options: { data: { full_name: string } } }) => Promise<{ error: { message: string } | null }> }).signUp({
         email: email.trim(),
         password,
         options: {

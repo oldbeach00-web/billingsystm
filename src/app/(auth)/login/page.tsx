@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2, AlertCircle, Lock } from "lucide-react";
 import { loginAction } from "@/app/actions/auth";
 import { cn } from "@/lib/utils";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -27,7 +29,7 @@ export default function LoginPage() {
       }
 
       // Successful login -> Redirect to dashboard
-      window.location.href = "/dashboard";
+      router.push("/dashboard");
     } catch {
       // Fallback: API Route Handler
       try {
@@ -38,7 +40,7 @@ export default function LoginPage() {
         });
         const data = await res.json();
         if (res.ok && data.success) {
-          window.location.href = "/dashboard";
+          router.push("/dashboard");
           return;
         }
         setError(data?.error || "Incorrect password. Please try again.");

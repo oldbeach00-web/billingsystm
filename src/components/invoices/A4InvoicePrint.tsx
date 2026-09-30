@@ -1,10 +1,15 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { db } from '@/lib/db';
+import { db } from "@/lib/db";
 import { X, Printer } from "lucide-react";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
-import type { Invoice, Customer, InvoiceItem, Product } from "@/types/database";
+import type {
+  Invoice,
+  Customer,
+  InvoiceItem,
+  Product,
+} from "@/types/database";
 
 export interface ShopDetails {
   name: string;
@@ -23,50 +28,92 @@ export const DEFAULT_SHOP_DETAILS: ShopDetails = {
   email: "billing@example.com",
   gstin: "27AAAAA0000A1Z5",
   footer: "Thank you for your business!",
-  terms: "1. Goods once sold will not be taken back or exchanged.\n2. Payment is due within agreed payment terms.",
+  terms:
+    "1. Goods once sold will not be taken back or exchanged.\n2. Payment is due within agreed payment terms.",
 };
 
 interface A4InvoicePrintProps {
-  invoice: Invoice & { customer?: Customer; items?: (InvoiceItem & { product?: Product })[] };
+  invoice: Invoice & {
+    customer?: Customer;
+    items?: (InvoiceItem & { product?: Product })[];
+  };
   shopDetails?: ShopDetails;
   onClose: () => void;
 }
+
+type SettingRow = {
+  key: string;
+  value: string | number;
+};
 
 export function A4InvoicePrint({
   invoice,
   shopDetails: initialShopDetails,
   onClose,
 }: A4InvoicePrintProps) {
-  
   const printRef = useRef<HTMLDivElement>(null);
-  const [shopDetails, setShopDetails] = useState<ShopDetails>(initialShopDetails || DEFAULT_SHOP_DETAILS);
+
+  const [shopDetails, setShopDetails] = useState<ShopDetails>(
+    initialShopDetails || DEFAULT_SHOP_DETAILS
+  );
 
   useEffect(() => {
-    (async () => {
-      const { data } = await (db.from("settings") as any).select("*");
+    const loadShopDetails = async () => {
+      const result = await db.from("settings").select("*");
+
+      const data = result.data as SettingRow[] | null;
+
       if (data && data.length > 0) {
-        const settingsMap: Record<string, any> = {};
-        (data as any[])?.forEach((row) => { settingsMap[row.key] = row.value; });
+        const settingsMap: Record<string, string | number> = {};
+
+        data.forEach((row) => {
+          settingsMap[String(row.key)] = row.value;
+        });
 
         setShopDetails({
-          name: settingsMap.shop_name || DEFAULT_SHOP_DETAILS.name,
-          address: settingsMap.shop_address || DEFAULT_SHOP_DETAILS.address,
-          phone: settingsMap.shop_phone || DEFAULT_SHOP_DETAILS.phone,
-          email: settingsMap.shop_email || DEFAULT_SHOP_DETAILS.email,
-          gstin: settingsMap.shop_gstin || DEFAULT_SHOP_DETAILS.gstin,
-          footer: settingsMap.invoice_footer || DEFAULT_SHOP_DETAILS.footer,
-          terms: settingsMap.terms_and_conditions || DEFAULT_SHOP_DETAILS.terms,
+          name: String(
+            settingsMap.shop_name || DEFAULT_SHOP_DETAILS.name
+          ),
+          address: String(
+            settingsMap.shop_address || DEFAULT_SHOP_DETAILS.address
+          ),
+          phone: String(
+            settingsMap.shop_phone || DEFAULT_SHOP_DETAILS.phone
+          ),
+          email: String(
+            settingsMap.shop_email || DEFAULT_SHOP_DETAILS.email
+          ),
+          gstin: String(
+            settingsMap.shop_gstin || DEFAULT_SHOP_DETAILS.gstin
+          ),
+          footer:
+            settingsMap.invoice_footer != null
+              ? String(settingsMap.invoice_footer)
+              : DEFAULT_SHOP_DETAILS.footer,
+          terms:
+            settingsMap.terms_and_conditions != null
+              ? String(settingsMap.terms_and_conditions)
+              : DEFAULT_SHOP_DETAILS.terms,
         });
       }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    };
+
+    void loadShopDetails();
   }, []);
 
   const handlePrint = () => {
     if (!printRef.current) return;
+
     const printContents = printRef.current.innerHTML;
-    const win = window.open("", "_blank", "width=900,height=700");
+
+    const win = window.open(
+      "",
+      "_blank",
+      "width=900,height=700"
+    );
+
     if (!win) return;
+
     win.document.write(`
       <!DOCTYPE html>
       <html>
@@ -104,8 +151,10 @@ export function A4InvoicePrint({
         </body>
       </html>
     `);
+
     win.document.close();
     win.focus();
+
     setTimeout(() => {
       win.print();
       win.close();
@@ -113,6 +162,7 @@ export function A4InvoicePrint({
   };
 
   const status = invoice.status || "due";
+
   const statusLabel =
     status === "paid"
       ? "PAID"
@@ -124,7 +174,11 @@ export function A4InvoicePrint({
 
   const paidAmt = Number(invoice.amount_paid || 0);
   const totalAmt = Number(invoice.total_amount || 0);
-  const balanceAmt = Number(invoice.amount_due ?? Math.max(0, totalAmt - paidAmt));
+
+  const balanceAmt = Number(
+    invoice.amount_due ??
+      Math.max(0, totalAmt - paidAmt)
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
@@ -135,17 +189,22 @@ export function A4InvoicePrint({
             <h3 className="text-lg font-bold text-gray-900 dark:text-white">
               Invoice #{invoice.invoice_number}
             </h3>
+
             <span
               className={cn(
                 "px-2.5 py-0.5 rounded-full text-xs font-bold uppercase",
-                status === "paid" && "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
-                status === "partially_paid" && "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
-                (status === "due" || status === "sent") && "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
+                status === "paid" &&
+                  "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+                status === "partially_paid" &&
+                  "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+                (status === "due" || status === "sent") &&
+                  "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
               )}
             >
               {statusLabel}
             </span>
           </div>
+
           <div className="flex items-center gap-3">
             <button
               onClick={handlePrint}
@@ -154,6 +213,7 @@ export function A4InvoicePrint({
               <Printer className="w-4 h-4" />
               Print / Reprint Invoice
             </button>
+
             <button
               onClick={onClose}
               className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg"
@@ -176,16 +236,44 @@ export function A4InvoicePrint({
                 <h1 className="text-2xl font-black text-indigo-600 tracking-wide uppercase">
                   {shopDetails.name}
                 </h1>
-                <p className="text-xs text-gray-600 mt-1 max-w-sm">{shopDetails.address}</p>
-                <p className="text-xs text-gray-600">Phone: {shopDetails.phone} | Email: {shopDetails.email}</p>
-                <p className="text-xs font-semibold text-gray-800 mt-1">GSTIN: {shopDetails.gstin}</p>
+
+                <p className="text-xs text-gray-600 mt-1 max-w-sm">
+                  {shopDetails.address}
+                </p>
+
+                <p className="text-xs text-gray-600">
+                  Phone: {shopDetails.phone} | Email:{" "}
+                  {shopDetails.email}
+                </p>
+
+                <p className="text-xs font-semibold text-gray-800 mt-1">
+                  GSTIN: {shopDetails.gstin}
+                </p>
               </div>
+
               <div className="text-right">
-                <h2 className="text-2xl font-bold text-gray-900 tracking-wider">TAX INVOICE</h2>
-                <p className="text-sm font-semibold text-indigo-600 mt-1">#{invoice.invoice_number}</p>
+                <h2 className="text-2xl font-bold text-gray-900 tracking-wider">
+                  TAX INVOICE
+                </h2>
+
+                <p className="text-sm font-semibold text-indigo-600 mt-1">
+                  #{invoice.invoice_number}
+                </p>
+
                 <div className="mt-2 text-xs space-y-0.5 text-gray-600">
-                  <p><span className="font-semibold text-gray-800">Date:</span> {formatDate(invoice.issue_date)}</p>
-                  <p><span className="font-semibold text-gray-800">Due Date:</span> {formatDate(invoice.due_date)}</p>
+                  <p>
+                    <span className="font-semibold text-gray-800">
+                      Date:
+                    </span>{" "}
+                    {formatDate(invoice.issue_date)}
+                  </p>
+
+                  <p>
+                    <span className="font-semibold text-gray-800">
+                      Due Date:
+                    </span>{" "}
+                    {formatDate(invoice.due_date)}
+                  </p>
                 </div>
               </div>
             </div>
@@ -193,36 +281,64 @@ export function A4InvoicePrint({
             {/* Customer & Bill Details */}
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs">
-                <p className="font-bold text-gray-500 uppercase tracking-wider text-[10px] mb-1">Billed To (Customer)</p>
-                <p className="font-bold text-sm text-gray-900">{invoice.customer?.name || "Walk-in Customer"}</p>
-                {invoice.customer?.phone && <p className="text-gray-600">Phone: {invoice.customer.phone}</p>}
-                {invoice.customer?.billing_address && (
-                  <p className="text-gray-600 mt-0.5">Address: {invoice.customer.billing_address}</p>
+                <p className="font-bold text-gray-500 uppercase tracking-wider text-[10px] mb-1">
+                  Billed To (Customer)
+                </p>
+
+                <p className="font-bold text-sm text-gray-900">
+                  {invoice.customer?.name || "Walk-in Customer"}
+                </p>
+
+                {invoice.customer?.phone && (
+                  <p className="text-gray-600">
+                    Phone: {invoice.customer.phone}
+                  </p>
                 )}
+
+                {invoice.customer?.billing_address && (
+                  <p className="text-gray-600 mt-0.5">
+                    Address: {invoice.customer.billing_address}
+                  </p>
+                )}
+
                 {invoice.customer?.gstin && (
-                  <p className="font-medium text-gray-800 mt-1">GSTIN: {invoice.customer.gstin}</p>
+                  <p className="font-medium text-gray-800 mt-1">
+                    GSTIN: {invoice.customer.gstin}
+                  </p>
                 )}
               </div>
 
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs flex flex-col justify-between">
                 <div>
-                  <p className="font-bold text-gray-500 uppercase tracking-wider text-[10px] mb-1">Invoice Status</p>
+                  <p className="font-bold text-gray-500 uppercase tracking-wider text-[10px] mb-1">
+                    Invoice Status
+                  </p>
+
                   <div className="flex items-center gap-2">
                     <span
                       className={cn(
                         "badge px-3 py-1 rounded-full text-xs font-bold uppercase",
-                        status === "paid" && "badge-paid bg-emerald-100 text-emerald-800",
-                        status === "partially_paid" && "badge-partial bg-amber-100 text-amber-800",
-                        (status === "due" || status === "sent") && "badge-due bg-red-100 text-red-800"
+                        status === "paid" &&
+                          "badge-paid bg-emerald-100 text-emerald-800",
+                        status === "partially_paid" &&
+                          "badge-partial bg-amber-100 text-amber-800",
+                        (status === "due" || status === "sent") &&
+                          "badge-due bg-red-100 text-red-800"
                       )}
                     >
                       {statusLabel}
                     </span>
                   </div>
                 </div>
+
                 <div className="mt-2 text-right">
-                  <p className="text-[10px] text-gray-500 uppercase font-semibold">Total Amount</p>
-                  <p className="text-lg font-black text-indigo-600">{formatCurrency(totalAmt)}</p>
+                  <p className="text-[10px] text-gray-500 uppercase font-semibold">
+                    Total Amount
+                  </p>
+
+                  <p className="text-lg font-black text-indigo-600">
+                    {formatCurrency(totalAmt)}
+                  </p>
                 </div>
               </div>
             </div>
@@ -233,49 +349,91 @@ export function A4InvoicePrint({
                 <thead>
                   <tr className="bg-indigo-600 text-white font-semibold">
                     <th className="py-2 px-3 text-left w-8">#</th>
-                    <th className="py-2 px-3 text-left">Item &amp; Description</th>
-                    <th className="py-2 px-3 text-center w-20">HSN/SAC</th>
-                    <th className="py-2 px-3 text-right w-16">Qty</th>
-                    <th className="py-2 px-3 text-right w-24">Rate</th>
-                    <th className="py-2 px-3 text-right w-20">GST %</th>
-                    <th className="py-2 px-3 text-right w-20">Disc %</th>
-                    <th className="py-2 px-3 text-right w-28">Amount</th>
+                    <th className="py-2 px-3 text-left">
+                      Item &amp; Description
+                    </th>
+                    <th className="py-2 px-3 text-center w-20">
+                      HSN/SAC
+                    </th>
+                    <th className="py-2 px-3 text-right w-16">
+                      Qty
+                    </th>
+                    <th className="py-2 px-3 text-right w-24">
+                      Rate
+                    </th>
+                    <th className="py-2 px-3 text-right w-20">
+                      GST %
+                    </th>
+                    <th className="py-2 px-3 text-right w-20">
+                      Disc %
+                    </th>
+                    <th className="py-2 px-3 text-right w-28">
+                      Amount
+                    </th>
                   </tr>
                 </thead>
+
                 <tbody className="divide-y divide-gray-200">
                   {invoice.items && invoice.items.length > 0 ? (
                     invoice.items.map((item, idx) => (
-                      <tr key={item.id || idx} className="hover:bg-gray-50">
-                        <td className="py-2.5 px-3 text-gray-500 text-center">{idx + 1}</td>
+                      <tr
+                        key={item.id || idx}
+                        className="hover:bg-gray-50"
+                      >
+                        <td className="py-2.5 px-3 text-gray-500 text-center">
+                          {idx + 1}
+                        </td>
+
                         <td className="py-2.5 px-3">
-                          <p className="font-semibold text-gray-900">{item.description}</p>
+                          <p className="font-semibold text-gray-900">
+                            {item.description}
+                          </p>
+
                           {item.product?.sku && (
-                            <p className="text-[10px] text-gray-500">SKU: {item.product.sku}</p>
+                            <p className="text-[10px] text-gray-500">
+                              SKU: {item.product.sku}
+                            </p>
                           )}
                         </td>
+
                         <td className="py-2.5 px-3 text-center text-gray-600">
                           {item.product?.hsn_sac || "—"}
                         </td>
+
                         <td className="py-2.5 px-3 text-right font-medium">
-                          {item.quantity} {item.product?.unit_of_measure || ""}
+                          {item.quantity}{" "}
+                          {item.product?.unit_of_measure || ""}
                         </td>
+
                         <td className="py-2.5 px-3 text-right text-gray-700">
                           {formatCurrency(Number(item.unit_price))}
                         </td>
+
                         <td className="py-2.5 px-3 text-right text-gray-700">
-                          {item.tax_rate > 0 ? `${item.tax_rate}%` : "0%"}
+                          {item.tax_rate > 0
+                            ? `${item.tax_rate}%`
+                            : "0%"}
                         </td>
+
                         <td className="py-2.5 px-3 text-right text-gray-700">
-                          {item.discount_percentage > 0 ? `${item.discount_percentage}%` : "—"}
+                          {item.discount_percentage > 0
+                            ? `${item.discount_percentage}%`
+                            : "—"}
                         </td>
+
                         <td className="py-2.5 px-3 text-right font-bold text-gray-900">
-                          {formatCurrency(Number(item.total_amount))}
+                          {formatCurrency(
+                            Number(item.total_amount)
+                          )}
                         </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={8} className="py-4 text-center text-gray-400">
+                      <td
+                        colSpan={8}
+                        className="py-4 text-center text-gray-400"
+                      >
                         No line items found.
                       </td>
                     </tr>
@@ -289,32 +447,72 @@ export function A4InvoicePrint({
               <table className="totals-table text-xs border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
                 <tbody>
                   <tr>
-                    <td className="text-gray-600 font-medium">Subtotal:</td>
-                    <td className="text-right font-semibold">{formatCurrency(Number(invoice.subtotal || 0))}</td>
+                    <td className="text-gray-600 font-medium">
+                      Subtotal:
+                    </td>
+
+                    <td className="text-right font-semibold">
+                      {formatCurrency(
+                        Number(invoice.subtotal || 0)
+                      )}
+                    </td>
                   </tr>
+
                   <tr>
-                    <td className="text-gray-600 font-medium">Total GST:</td>
-                    <td className="text-right font-semibold">{formatCurrency(Number(invoice.tax_amount || 0))}</td>
+                    <td className="text-gray-600 font-medium">
+                      Total GST:
+                    </td>
+
+                    <td className="text-right font-semibold">
+                      {formatCurrency(
+                        Number(invoice.tax_amount || 0)
+                      )}
+                    </td>
                   </tr>
+
                   {Number(invoice.discount_amount || 0) > 0 && (
                     <tr>
-                      <td className="text-red-600 font-medium">Discount:</td>
+                      <td className="text-red-600 font-medium">
+                        Discount:
+                      </td>
+
                       <td className="text-right font-semibold text-red-600">
-                        - {formatCurrency(Number(invoice.discount_amount))}
+                        -{" "}
+                        {formatCurrency(
+                          Number(invoice.discount_amount)
+                        )}
                       </td>
                     </tr>
                   )}
+
                   <tr className="border-t border-gray-300 font-bold bg-white text-sm">
-                    <td className="text-gray-900 py-2">Grand Total:</td>
-                    <td className="text-right text-indigo-600 py-2">{formatCurrency(totalAmt)}</td>
+                    <td className="text-gray-900 py-2">
+                      Grand Total:
+                    </td>
+
+                    <td className="text-right text-indigo-600 py-2">
+                      {formatCurrency(totalAmt)}
+                    </td>
                   </tr>
+
                   <tr className="text-emerald-700">
-                    <td className="font-semibold">Paid Amount:</td>
-                    <td className="text-right font-bold">{formatCurrency(paidAmt)}</td>
+                    <td className="font-semibold">
+                      Paid Amount:
+                    </td>
+
+                    <td className="text-right font-bold">
+                      {formatCurrency(paidAmt)}
+                    </td>
                   </tr>
+
                   <tr className="text-amber-800 bg-amber-50 font-bold border-t border-amber-200">
-                    <td className="py-1.5">Balance Amount:</td>
-                    <td className="text-right py-1.5">{formatCurrency(balanceAmt)}</td>
+                    <td className="py-1.5">
+                      Balance Amount:
+                    </td>
+
+                    <td className="text-right py-1.5">
+                      {formatCurrency(balanceAmt)}
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -322,22 +520,44 @@ export function A4InvoicePrint({
 
             {invoice.notes && (
               <div className="border-t border-gray-200 pt-3 text-xs">
-                <p className="font-bold text-gray-500 uppercase text-[10px]">Notes / Instructions</p>
-                <p className="text-gray-700 mt-0.5">{invoice.notes}</p>
+                <p className="font-bold text-gray-500 uppercase text-[10px]">
+                  Notes / Instructions
+                </p>
+
+                <p className="text-gray-700 mt-0.5">
+                  {invoice.notes}
+                </p>
               </div>
             )}
 
             {/* Footer Signatory & Terms */}
             <div className="pt-6 border-t border-gray-200 flex justify-between items-end text-[10px] text-gray-500">
               <div>
-                <p className="font-bold text-gray-700 mb-1">Terms &amp; Conditions:</p>
-                <p className="whitespace-pre-line">{shopDetails.terms || DEFAULT_SHOP_DETAILS.terms}</p>
-                <p className="mt-2 text-indigo-600 font-semibold">{shopDetails.footer || DEFAULT_SHOP_DETAILS.footer}</p>
+                <p className="font-bold text-gray-700 mb-1">
+                  Terms &amp; Conditions:
+                </p>
+
+                <p className="whitespace-pre-line">
+                  {shopDetails.terms ||
+                    DEFAULT_SHOP_DETAILS.terms}
+                </p>
+
+                <p className="mt-2 text-indigo-600 font-semibold">
+                  {shopDetails.footer ||
+                    DEFAULT_SHOP_DETAILS.footer}
+                </p>
               </div>
+
               <div className="text-center w-48">
                 <div className="h-12 border-b border-gray-400 mb-1"></div>
-                <p className="font-bold text-gray-800">For {shopDetails.name}</p>
-                <p className="text-[9px] text-gray-400">(Authorised Signatory)</p>
+
+                <p className="font-bold text-gray-800">
+                  For {shopDetails.name}
+                </p>
+
+                <p className="text-[9px] text-gray-400">
+                  (Authorised Signatory)
+                </p>
               </div>
             </div>
           </div>

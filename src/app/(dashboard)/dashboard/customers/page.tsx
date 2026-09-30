@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import {  useState, useEffect , useCallback } from "react";
 import { db } from '@/lib/db';
 import type { Customer, Invoice } from "@/types/database";
 import {
@@ -59,7 +59,7 @@ export default function CustomersPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
 
-  const fetchCustomers = async () => {
+  const fetchCustomers = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
@@ -111,17 +111,12 @@ export default function CustomersPage() {
       });
 
       setCustomers(mapped);
-    } catch (err: any) {
-      setError(err.message || "An error occurred while fetching customers.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    } catch (err: unknown) { setError((err as { message?: string })?.message || "An error occurred while fetching customers.");
+    } finally { setIsLoading(false); } }, [page, pageSize, debouncedSearch]);
 
   useEffect(() => {
-    fetchCustomers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, debouncedSearch]);
+    setTimeout(() => fetchCustomers(), 0);
+    }, [page, debouncedSearch, fetchCustomers]);
 
   const handleOpenModal = (customer?: Customer) => {
     setModalError(null);
@@ -170,7 +165,7 @@ export default function CustomersPage() {
     };
 
     if (editingCustomer) {
-      const { error: updateErr } = await (db.from("customers") as any)
+      const { error: updateErr } = await (db.from("customers") as { update: (data: unknown) => { eq: (k: string, v: string) => Promise<{error: {message: string} | null}> }, insert: (data: unknown[]) => Promise<{error: {message: string} | null}>, select: (s: string) => { eq: (k: string, v: string) => { single: () => Promise<{data: unknown, error: {message: string} | null}> } } })
         .update(payload)
         .eq("id", editingCustomer.id);
 
@@ -179,17 +174,17 @@ export default function CustomersPage() {
         setIsSaving(false);
       } else {
         setIsModalOpen(false);
-        await fetchCustomers();
+        await setTimeout(() => fetchCustomers(), 0);
       }
     } else {
-      const { error: insertErr } = await (db.from("customers") as any).insert([payload]);
+      const { error: insertErr } = await (db.from("customers") as { update: (data: unknown) => { eq: (k: string, v: string) => Promise<{error: {message: string} | null}> }, insert: (data: unknown[]) => Promise<{error: {message: string} | null}>, select: (s: string) => { eq: (k: string, v: string) => { single: () => Promise<{data: unknown, error: {message: string} | null}> } } }).insert([payload]);
 
       if (insertErr) {
         setModalError(insertErr.message);
         setIsSaving(false);
       } else {
         setIsModalOpen(false);
-        await fetchCustomers();
+        await setTimeout(() => fetchCustomers(), 0);
       }
     }
 
@@ -203,7 +198,7 @@ export default function CustomersPage() {
     if (delErr) {
       alert("Error deleting customer: " + delErr.message);
     } else {
-      await fetchCustomers();
+      await setTimeout(() => fetchCustomers(), 0);
     }
   };
 

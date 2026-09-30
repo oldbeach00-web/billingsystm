@@ -26,10 +26,10 @@ export default function DashboardError({
         Module Temporarily Unavailable
       </h2>
       <p className="text-gray-600 dark:text-gray-400 max-w-md mb-2">
-        We encountered an unexpected error while trying to load this module's data. 
+        We encountered an unexpected error while trying to load this module&apos;s data. 
       </p>
       <p className="text-sm text-gray-500 dark:text-gray-500 max-w-md mb-8">
-        Don't worry, the rest of the application is still working perfectly. You can try reloading this module or use the sidebar to navigate elsewhere.
+        Don&apos;t worry, the rest of the application is still working perfectly. You can try reloading this module or use the sidebar to navigate elsewhere.
       </p>
       
       <div className="flex gap-4">

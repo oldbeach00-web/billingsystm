@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Menu, Bell, User, LogOut, ChevronDown } from "lucide-react";
-import { db } from '@/lib/db';
 import { cn, getInitials } from "@/lib/utils";
 import type { UserProfile } from "@/types/database";
 
@@ -19,7 +18,7 @@ export function Header({ onMobileMenuToggle, title = "Dashboard" }: HeaderProps)
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
-    setUser({
+    setTimeout(() => setUser({
       id: "mock-user-id",
       email: "user@example.com",
       full_name: "Admin User",
@@ -29,7 +28,7 @@ export function Header({ onMobileMenuToggle, title = "Dashboard" }: HeaderProps)
       is_active: true,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    });
+    }), 0);
   }, []);
 
   const handleLogout = async () => {
@@ -39,7 +38,7 @@ export function Header({ onMobileMenuToggle, title = "Dashboard" }: HeaderProps)
     } catch {
       // Ignore errors on logout
     }
-    window.location.href = "/login";
+    router.push("/login");
   };
 
   const initials = user?.full_name

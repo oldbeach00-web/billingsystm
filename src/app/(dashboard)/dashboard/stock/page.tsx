@@ -1,8 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { db } from '@/lib/db';
-import type { Product, StockMovement, Category, UserProfile } from "@/types/database";
+import { useState, useEffect, useCallback } from "react";
+import { db } from "@/lib/db";
+import type {
+  Product,
+  StockMovement,
+  Category,
+  UserProfile,
+} from "@/types/database";
 import {
   Package,
   History,
@@ -19,72 +24,160 @@ import { cn, formatDate } from "@/lib/utils";
 
 type Tab = "overview" | "movements";
 
+type ProductWithCategory = Product & {
+  category?: Category;
+};
+
+type MovementWithRelations = StockMovement & {
+  product?: Product;
+  user?: UserProfile;
+};
+
+type FetchDataResult = {
+  products: ProductWithCategory[];
+  movements: MovementWithRelations[];
+  error: string | null;
+};
+
 export default function StockPage() {
-  
   const [activeTab, setActiveTab] = useState<Tab>("overview");
-  
-  // Data states
-  const [products, setProducts] = useState<(Product & { category?: Category })[]>([]);
-  const [movements, setMovements] = useState<(StockMovement & { product?: Product; user?: UserProfile })[]>([]);
+
+  const [products, setProducts] = useState<ProductWithCategory[]>([]);
+  const [movements, setMovements] = useState<MovementWithRelations[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filter states
   const [searchQuery, setSearchQuery] = useState("");
   const [showOnlyLowStock, setShowOnlyLowStock] = useState(false);
 
-  // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [adjustType, setAdjustType] = useState<"addition" | "reduction" | "damage">("addition");
+  const [adjustType, setAdjustType] = useState<
+    "addition" | "reduction" | "damage"
+  >("addition");
   const [adjustQty, setAdjustQty] = useState("");
   const [adjustNotes, setAdjustNotes] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
-  const fetchData = async () => {
-    setIsLoading(true);
-    setError(null);
-
+  const fetchData = useCallback(async (): Promise<FetchDataResult> => {
     if (activeTab === "overview") {
       const { data, error: fetchError } = await db
         .from("products")
         .select("*, category:categories(*)")
         .order("name")
         .limit(1000);
-      
-      if (fetchError) setError(fetchError.message);
-      else {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const mapped = (data as any[])?.map(p => ({
-          ...p,
-          category: Array.isArray(p.category) ? p.category[0] : p.category
-        })) || [];
-        setProducts(mapped);
+
+      if (fetchError) {
+        return {
+          products: [],
+          movements: [],
+          error: fetchError.message,
+        };
       }
-    } else {
-      const { data, error: fetchError } = await db
-        .from("stock_movements")
-        .select("*, product:products(*), user:user_profiles(*)")
-        .order("created_at", { ascending: false })
-        .limit(100);
-        
-      if (fetchError) setError(fetchError.message);
-      else {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const mapped = (data as any[])?.map(m => ({
-          ...m,
-          product: Array.isArray(m.product) ? m.product[0] : m.product,
-          user: Array.isArray(m.user) ? m.user[0] : m.user
-        })) || [];
-        setMovements(mapped);
-      }
+
+      const mappedProducts: ProductWithCategory[] = (
+        data as Array<
+          Product & {
+            category?: Category | Category[];
+          }
+        >
+      ).map((product) => ({
+        ...product,
+        category: Array.isArray(product.category)
+          ? product.category[0]
+          : product.category,
+      }));
+
+      return {
+        products: mappedProducts,
+        movements: [],
+        error: null,
+      };
     }
-    
+
+    const { data, error: fetchError } = await db
+      .from("stock_movements")
+      .select("*, product:products(*), user:user_profiles(*)")
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (fetchError) {
+      return {
+        products: [],
+        movements: [],
+        error: fetchError.message,
+      };
+    }
+
+    const mappedMovements: MovementWithRelations[] = (
+      data as Array<
+        StockMovement & {
+          product?: Product | Product[];
+          user?: UserProfile | UserProfile[];
+        }
+      >
+    ).map((movement) => ({
+      ...movement,
+      product: Array.isArray(movement.product)
+        ? movement.product[0]
+        : movement.product,
+      user: Array.isArray(movement.user)
+        ? movement.user[0]
+        : movement.user,
+    }));
+
+    return {
+      products: [],
+      movements: mappedMovements,
+      error: null,
+    };
+  }, [activeTab]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadData = async () => {
+      setIsLoading(true);
+      setError(null);
+
+      const result = await fetchData();
+
+      if (cancelled) return;
+
+      if (result.error) {
+        setError(result.error);
+      } else if (activeTab === "overview") {
+        setProducts(result.products);
+      } else {
+        setMovements(result.movements);
+      }
+
+      setIsLoading(false);
+    };
+
+    void loadData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchData, activeTab]);
+
+  const refreshData = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    const result = await fetchData();
+
+    if (result.error) {
+      setError(result.error);
+    } else if (activeTab === "overview") {
+      setProducts(result.products);
+    } else {
+      setMovements(result.movements);
+    }
+
     setIsLoading(false);
   };
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchData(); }, [activeTab]);
 
   const handleOpenModal = (product: Product) => {
     setSelectedProduct(product);
@@ -96,9 +189,11 @@ export default function StockPage() {
 
   const handleAdjustStock = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!selectedProduct) return;
-    
+
     const qty = parseFloat(adjustQty);
+
     if (isNaN(qty) || qty <= 0) {
       setError("Please enter a valid positive quantity");
       return;
@@ -107,22 +202,22 @@ export default function StockPage() {
     setIsSaving(true);
     setError(null);
 
-    // Get current auth user
-    const { data: { user } } = await db.auth.getUser();
+    const {
+      data: { user },
+    } = await db.auth.getUser();
+
     if (!user) {
       setError("Authentication error. Please log in again.");
       setIsSaving(false);
       return;
     }
 
-    // Determine actual quantity change and movement type
     let quantityChange = 0;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let movementType: any = "adjustment";
-    
+    let movementType: "adjustment" | "damage" = "adjustment";
+
     if (adjustType === "addition") {
       quantityChange = qty;
-      movementType = "adjustment"; // or purchase if it was from a PO
+      movementType = "adjustment";
     } else if (adjustType === "reduction") {
       quantityChange = -qty;
       movementType = "adjustment";
@@ -134,8 +229,8 @@ export default function StockPage() {
     const currentStock = Number(selectedProduct.stock_quantity);
     const newStock = currentStock + quantityChange;
 
-    // We use the two-step JS call for maximum compatibility if RPC is not created yet
-    const { error: updateError } = await (db.from("products") as any)
+    const { error: updateError } = await db
+      .from("products")
       .update({ stock_quantity: newStock })
       .eq("id", selectedProduct.id);
 
@@ -145,33 +240,45 @@ export default function StockPage() {
       return;
     }
 
-    const { error: movementError } = await (db.from("stock_movements") as any)
-      .insert([{
-        product_id: selectedProduct.id,
-        movement_type: movementType,
-        quantity: quantityChange,
-        quantity_before: currentStock,
-        quantity_after: newStock,
-        notes: adjustNotes || null,
-        created_by: user.id
-      }]);
+    const { error: movementError } = await db
+      .from("stock_movements")
+      .insert([
+        {
+          product_id: selectedProduct.id,
+          movement_type: movementType,
+          quantity: quantityChange,
+          quantity_before: currentStock,
+          quantity_after: newStock,
+          notes: adjustNotes || null,
+          created_by: user.id,
+        },
+      ]);
 
     if (movementError) {
-      // Revert stock (best effort)
-      await (db.from("products") as any).update({ stock_quantity: currentStock }).eq("id", selectedProduct.id);
+      await db
+        .from("products")
+        .update({ stock_quantity: currentStock })
+        .eq("id", selectedProduct.id);
+
       setError("Error recording movement: " + movementError.message);
     } else {
       setIsModalOpen(false);
-      await fetchData(); // Refresh data
+      await refreshData();
     }
-    
+
     setIsSaving(false);
   };
 
-  const filteredProducts = products.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.sku.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredProducts = products.filter((p) => {
+    const query = searchQuery.toLowerCase();
+
+    const matchesSearch =
+      p.name.toLowerCase().includes(query) ||
+      p.sku.toLowerCase().includes(query);
+
     const isLowStock = p.stock_quantity <= p.min_stock_level;
     const matchesLowStock = showOnlyLowStock ? isLowStock : true;
+
     return matchesSearch && matchesLowStock;
   });
 
@@ -179,33 +286,35 @@ export default function StockPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Inventory Management</h2>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+            Inventory Management
+          </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Monitor stock levels and record adjustments
           </p>
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="flex border-b border-gray-200 dark:border-gray-700">
         <button
           onClick={() => setActiveTab("overview")}
           className={cn(
             "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
-            activeTab === "overview" 
-              ? "border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400" 
+            activeTab === "overview"
+              ? "border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400"
               : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
           )}
         >
           <Package className="w-4 h-4 inline mr-2" />
           Current Stock
         </button>
+
         <button
           onClick={() => setActiveTab("movements")}
           className={cn(
             "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
-            activeTab === "movements" 
-              ? "border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400" 
+            activeTab === "movements"
+              ? "border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400"
               : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
           )}
         >
@@ -221,12 +330,12 @@ export default function StockPage() {
         </div>
       )}
 
-      {/* OVERVIEW TAB */}
       {activeTab === "overview" && (
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+
               <input
                 type="text"
                 placeholder="Search products by name or SKU..."
@@ -235,6 +344,7 @@ export default function StockPage() {
                 className="w-full pl-9 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
+
             <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer whitespace-nowrap">
               <input
                 type="checkbox"
@@ -255,32 +365,56 @@ export default function StockPage() {
               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                 <thead className="bg-gray-50 dark:bg-gray-900/50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Product</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Current Stock</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Min Level</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Product
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Current Stock
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Min Level
+                    </th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
+
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                   {filteredProducts.map((prod) => {
-                    const isLowStock = prod.stock_quantity <= prod.min_stock_level;
+                    const isLowStock =
+                      prod.stock_quantity <= prod.min_stock_level;
+
                     return (
-                      <tr key={prod.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                      <tr
+                        key={prod.id}
+                        className="hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                      >
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex flex-col">
-                            <span className="text-sm font-medium text-gray-900 dark:text-white">{prod.name}</span>
-                            <span className="text-xs text-gray-500 dark:text-gray-400">SKU: {prod.sku} • {prod.category?.name || 'Uncategorized'}</span>
+                            <span className="text-sm font-medium text-gray-900 dark:text-white">
+                              {prod.name}
+                            </span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              SKU: {prod.sku} •{" "}
+                              {prod.category?.name || "Uncategorized"}
+                            </span>
                           </div>
                         </td>
+
                         <td className="px-6 py-4 whitespace-nowrap text-right">
                           <span className="text-sm font-bold text-gray-900 dark:text-white">
                             {prod.stock_quantity} {prod.unit_of_measure}
                           </span>
                         </td>
+
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-500 dark:text-gray-400">
                           {prod.min_stock_level} {prod.unit_of_measure}
                         </td>
+
                         <td className="px-6 py-4 whitespace-nowrap text-center">
                           {isLowStock ? (
                             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
@@ -293,6 +427,7 @@ export default function StockPage() {
                             </span>
                           )}
                         </td>
+
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                           <button
                             onClick={() => handleOpenModal(prod)}
@@ -304,9 +439,13 @@ export default function StockPage() {
                       </tr>
                     );
                   })}
+
                   {filteredProducts.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                      <td
+                        colSpan={5}
+                        className="px-6 py-8 text-center text-gray-500 dark:text-gray-400"
+                      >
                         No products found.
                       </td>
                     </tr>
@@ -318,7 +457,6 @@ export default function StockPage() {
         </div>
       )}
 
-      {/* MOVEMENTS TAB */}
       {activeTab === "movements" && (
         <div className="space-y-4">
           {isLoading ? (
@@ -330,61 +468,112 @@ export default function StockPage() {
               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                 <thead className="bg-gray-50 dark:bg-gray-900/50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date & Time</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Product</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Qty Change</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Before &rarr; After</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Notes & Ref</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Date & Time
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Product
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Type
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Qty Change
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Before &rarr; After
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Notes & Ref
+                    </th>
                   </tr>
                 </thead>
+
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                   {movements.map((mov) => {
                     const isPositive = mov.quantity > 0;
+
                     return (
-                      <tr key={mov.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                      <tr
+                        key={mov.id}
+                        className="hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                      >
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                           {formatDate(mov.created_at)}
                         </td>
+
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex flex-col">
-                            <span className="text-sm font-medium text-gray-900 dark:text-white">{mov.product?.name || 'Unknown'}</span>
-                            <span className="text-xs text-gray-500 dark:text-gray-400">SKU: {mov.product?.sku}</span>
+                            <span className="text-sm font-medium text-gray-900 dark:text-white">
+                              {mov.product?.name || "Unknown"}
+                            </span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              SKU: {mov.product?.sku}
+                            </span>
                           </div>
                         </td>
+
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={cn(
-                            "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium uppercase",
-                            mov.movement_type === 'sale' ? "bg-blue-100 text-blue-800" :
-                            mov.movement_type === 'purchase' ? "bg-purple-100 text-purple-800" :
-                            mov.movement_type === 'damage' ? "bg-red-100 text-red-800" :
-                            "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
-                          )}>
+                          <span
+                            className={cn(
+                              "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium uppercase",
+                              mov.movement_type === "sale"
+                                ? "bg-blue-100 text-blue-800"
+                                : mov.movement_type === "purchase"
+                                  ? "bg-purple-100 text-purple-800"
+                                  : mov.movement_type === "damage"
+                                    ? "bg-red-100 text-red-800"
+                                    : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
+                            )}
+                          >
                             {mov.movement_type}
                           </span>
                         </td>
+
                         <td className="px-6 py-4 whitespace-nowrap text-right">
-                          <span className={cn(
-                            "text-sm font-bold flex items-center justify-end gap-1",
-                            isPositive ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
-                          )}>
-                            {isPositive ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
+                          <span
+                            className={cn(
+                              "text-sm font-bold flex items-center justify-end gap-1",
+                              isPositive
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : "text-red-600 dark:text-red-400"
+                            )}
+                          >
+                            {isPositive ? (
+                              <ArrowUpRight className="w-4 h-4" />
+                            ) : (
+                              <ArrowDownRight className="w-4 h-4" />
+                            )}
                             {Math.abs(mov.quantity)}
                           </span>
                         </td>
+
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-500 dark:text-gray-400">
-                          {mov.quantity_before} &rarr; <span className="font-medium text-gray-900 dark:text-white">{mov.quantity_after}</span>
+                          {mov.quantity_before} &rarr;{" "}
+                          <span className="font-medium text-gray-900 dark:text-white">
+                            {mov.quantity_after}
+                          </span>
                         </td>
+
                         <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 max-w-[200px] truncate">
                           {mov.notes || "—"}
-                          {mov.reference_type && <span className="block text-xs opacity-75">{mov.reference_type} #{mov.reference_id?.slice(0,8)}</span>}
+                          {mov.reference_type && (
+                            <span className="block text-xs opacity-75">
+                              {mov.reference_type} #
+                              {mov.reference_id?.slice(0, 8)}
+                            </span>
+                          )}
                         </td>
                       </tr>
                     );
                   })}
+
                   {movements.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                      <td
+                        colSpan={6}
+                        className="px-6 py-8 text-center text-gray-500 dark:text-gray-400"
+                      >
                         No stock movements recorded yet.
                       </td>
                     </tr>
@@ -396,61 +585,69 @@ export default function StockPage() {
         </div>
       )}
 
-      {/* Adjust Stock Modal */}
       {isModalOpen && selectedProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg w-full max-w-md p-6">
             <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">
               Adjust Stock
             </h3>
+
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
               {selectedProduct.name} (SKU: {selectedProduct.sku})
             </p>
-            
+
             <form onSubmit={handleAdjustStock} className="space-y-4">
               <div className="bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg flex justify-between items-center mb-4 border border-gray-200 dark:border-gray-700">
-                <span className="text-sm text-gray-600 dark:text-gray-400">Current Stock</span>
-                <span className="text-lg font-bold text-gray-900 dark:text-white">{selectedProduct.stock_quantity} {selectedProduct.unit_of_measure}</span>
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Current Stock
+                </span>
+                <span className="text-lg font-bold text-gray-900 dark:text-white">
+                  {selectedProduct.stock_quantity}{" "}
+                  {selectedProduct.unit_of_measure}
+                </span>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Adjustment Type
                 </label>
+
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setAdjustType("addition")}
                     className={cn(
                       "flex flex-col items-center justify-center p-2 rounded-lg border text-sm transition-colors",
-                      adjustType === "addition" 
-                        ? "border-emerald-600 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:border-emerald-500 dark:text-emerald-400" 
+                      adjustType === "addition"
+                        ? "border-emerald-600 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:border-emerald-500 dark:text-emerald-400"
                         : "border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
                     )}
                   >
                     <Plus className="w-5 h-5 mb-1" />
                     Add
                   </button>
+
                   <button
                     type="button"
                     onClick={() => setAdjustType("reduction")}
                     className={cn(
                       "flex flex-col items-center justify-center p-2 rounded-lg border text-sm transition-colors",
-                      adjustType === "reduction" 
-                        ? "border-amber-600 bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:border-amber-500 dark:text-amber-400" 
+                      adjustType === "reduction"
+                        ? "border-amber-600 bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:border-amber-500 dark:text-amber-400"
                         : "border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
                     )}
                   >
                     <Minus className="w-5 h-5 mb-1" />
                     Reduce
                   </button>
+
                   <button
                     type="button"
                     onClick={() => setAdjustType("damage")}
                     className={cn(
                       "flex flex-col items-center justify-center p-2 rounded-lg border text-sm transition-colors",
-                      adjustType === "damage" 
-                        ? "border-red-600 bg-red-50 text-red-700 dark:bg-red-900/30 dark:border-red-500 dark:text-red-400" 
+                      adjustType === "damage"
+                        ? "border-red-600 bg-red-50 text-red-700 dark:bg-red-900/30 dark:border-red-500 dark:text-red-400"
                         : "border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
                     )}
                   >
@@ -464,6 +661,7 @@ export default function StockPage() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Quantity ({selectedProduct.unit_of_measure}) *
                 </label>
+
                 <input
                   type="number"
                   step="0.01"
@@ -480,6 +678,7 @@ export default function StockPage() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Notes / Reason
                 </label>
+
                 <textarea
                   value={adjustNotes}
                   onChange={(e) => setAdjustNotes(e.target.value)}
@@ -497,12 +696,15 @@ export default function StockPage() {
                 >
                   Cancel
                 </button>
+
                 <button
                   type="submit"
                   disabled={isSaving || !adjustQty}
                   className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
                 >
-                  {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {isSaving && (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  )}
                   Confirm Adjustment
                 </button>
               </div>

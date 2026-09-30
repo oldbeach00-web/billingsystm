@@ -33,11 +33,10 @@ export function ProductForm({ initialData }: ProductFormProps) {
   });
 
   useEffect(() => {
-    db.from("categories").select("*").order("name").then(({ data }: any) => {
+    db.from("categories").select("*").order("name").then(({ data }: { data: Category[] | null; error: { message: string } | null }) => {
       if (data) setCategories(data);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,12 +59,12 @@ export function ProductForm({ initialData }: ProductFormProps) {
 
     let apiError;
     if (initialData) {
-      const { error: updateError } = await (db.from("products") as any)
+      const { error: updateError } = await (db.from("products") as { update: (data: unknown) => { eq: (k: string, v: string) => Promise<{error: {message: string} | null}> }, insert: (data: unknown[]) => Promise<{error: {message: string} | null}>, select: (s: string) => { eq: (k: string, v: string) => { single: () => Promise<{data: unknown, error: {message: string} | null}> } } })
         .update(payload)
         .eq("id", initialData.id);
       apiError = updateError;
     } else {
-      const { error: insertError } = await (db.from("products") as any)
+      const { error: insertError } = await (db.from("products") as { update: (data: unknown) => { eq: (k: string, v: string) => Promise<{error: {message: string} | null}> }, insert: (data: unknown[]) => Promise<{error: {message: string} | null}>, select: (s: string) => { eq: (k: string, v: string) => { single: () => Promise<{data: unknown, error: {message: string} | null}> } } })
         .insert([payload]);
       apiError = insertError;
     }
