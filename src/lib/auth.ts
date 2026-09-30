@@ -1,8 +1,10 @@
 const SESSION_COOKIE_NAME = "auth_session";
-const DEFAULT_PASSWORD = "oldbeach@786";
 
 export function getExpectedPassword(): string {
-  return process.env.AUTH_PASSWORD || DEFAULT_PASSWORD;
+  if (!process.env.AUTH_PASSWORD) {
+    throw new Error("AUTH_PASSWORD environment variable is missing.");
+  }
+  return process.env.AUTH_PASSWORD;
 }
 
 export function createSessionToken(password: string): string {
@@ -20,8 +22,12 @@ export function createSessionToken(password: string): string {
 
 export function isValidSessionToken(token: string | null | undefined): boolean {
   if (!token) return false;
-  const validToken = createSessionToken(getExpectedPassword());
-  return token === validToken;
+  try {
+    const validToken = createSessionToken(getExpectedPassword());
+    return token === validToken;
+  } catch {
+    return false;
+  }
 }
 
 export { SESSION_COOKIE_NAME };

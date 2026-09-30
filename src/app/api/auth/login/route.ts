@@ -1,43 +1,24 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { getExpectedPassword, createSessionToken, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { loginAction } from "@/app/actions/auth";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { password } = body || {};
 
-    if (!password || typeof password !== "string") {
+    const result = await loginAction(password);
+
+    if (!result.success) {
       return NextResponse.json(
-        { success: false, error: "Password is required." },
-        { status: 400 }
+        { success: false, error: result.error },
+        { status: result.error?.includes("Incorrect password") ? 401 : 400 }
       );
     }
-
-    const expectedPassword = getExpectedPassword();
-
-    if (password.trim() !== expectedPassword.trim()) {
-      return NextResponse.json(
-        { success: false, error: "Incorrect password. Please try again." },
-        { status: 401 }
-      );
-    }
-
-    const sessionToken = createSessionToken(expectedPassword);
-    const cookieStore = await cookies();
-
-    cookieStore.set(SESSION_COOKIE_NAME, sessionToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 30, // 30 days
-    });
 
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (error: any) {
     return NextResponse.json(
-      { success: false, error: "An error occurred during authentication." },
+      { success: false, error: error.message || "An error occurred during authentication." },
       { status: 500 }
     );
   }
