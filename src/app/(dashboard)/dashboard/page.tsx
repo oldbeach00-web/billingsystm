@@ -30,7 +30,7 @@ const quickLinks = [
   {
     label: "Add Customer",
     description: "Register a new customer",
-    href: "/dashboard/customers/new",
+    href: "/dashboard/customers",   // no /customers/new route — modal opens on this page
     icon: Users,
   },
   {
@@ -42,7 +42,7 @@ const quickLinks = [
   {
     label: "Record Payment",
     description: "Log an invoice payment",
-    href: "/dashboard/payments/new",
+    href: "/dashboard/payments",    // no /payments/new route — modal opens on this page
     icon: CreditCard,
   },
 ];
