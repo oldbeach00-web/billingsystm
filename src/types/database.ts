@@ -13,18 +13,45 @@ export type Json =
 // ─────────────────────────────────────────────
 
 export type UserRole = "admin" | "manager" | "staff";
-export type InvoiceStatus = "draft" | "sent" | "paid" | "overdue" | "cancelled" | "partially_paid" | "due";
-export type PaymentMethod = "cash" | "card" | "bank_transfer" | "upi" | "cheque" | "other";
-export type PaymentStatus = "pending" | "completed" | "failed" | "refunded";
-export type StockMovementType = "purchase" | "sale" | "adjustment" | "return" | "damage";
-export type SettingCategory = "general" | "billing" | "tax" | "notifications" | "appearance";
+export type InvoiceStatus =
+  | "draft"
+  | "sent"
+  | "paid"
+  | "overdue"
+  | "cancelled"
+  | "partially_paid"
+  | "due";
+export type PaymentMethod =
+  | "cash"
+  | "card"
+  | "bank_transfer"
+  | "upi"
+  | "cheque"
+  | "other";
+export type PaymentStatus =
+  | "pending"
+  | "completed"
+  | "failed"
+  | "refunded";
+export type StockMovementType =
+  | "purchase"
+  | "sale"
+  | "adjustment"
+  | "return"
+  | "damage";
+export type SettingCategory =
+  | "general"
+  | "billing"
+  | "tax"
+  | "notifications"
+  | "appearance";
 
 // ─────────────────────────────────────────────
 // Table Row Types
 // ─────────────────────────────────────────────
 
 export interface UserProfile {
-  id: string; // UUID references auth.users
+  id: string;
   email: string;
   full_name: string | null;
   role: UserRole;
@@ -39,7 +66,7 @@ export interface Category {
   id: string;
   name: string;
   description: string | null;
-  parent_id: string | null; // self-referencing for subcategories
+  parent_id: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -54,8 +81,8 @@ export interface Product {
   category_id: string | null;
   unit_price: number;
   cost_price: number;
-  tax_rate: number; // percentage e.g. 18 for 18%
-  unit_of_measure: string; // pcs, kg, litre, etc.
+  tax_rate: number;
+  unit_of_measure: string;
   stock_quantity: number;
   min_stock_level: number;
   max_stock_level: number | null;
@@ -63,7 +90,6 @@ export interface Product {
   image_url: string | null;
   created_at: string;
   updated_at: string;
-  // Joined
   category?: Category;
 }
 
@@ -72,7 +98,7 @@ export interface Customer {
   name: string;
   email: string | null;
   phone: string | null;
-  gstin: string | null; // GST Identification Number
+  gstin: string | null;
   billing_address: string | null;
   shipping_address: string | null;
   city: string | null;
@@ -102,10 +128,9 @@ export interface Invoice {
   amount_due: number;
   notes: string | null;
   terms: string | null;
-  created_by: string; // user id
+  created_by: string;
   created_at: string;
   updated_at: string;
-  // Joined
   customer?: Customer;
   items?: InvoiceItem[];
   payments?: Payment[];
@@ -124,7 +149,6 @@ export interface InvoiceItem {
   discount_amount: number;
   total_amount: number;
   created_at: string;
-  // Joined
   product?: Product;
 }
 
@@ -146,15 +170,14 @@ export interface StockMovement {
   id: string;
   product_id: string;
   movement_type: StockMovementType;
-  quantity: number; // positive for in, negative for out
+  quantity: number;
   quantity_before: number;
   quantity_after: number;
-  reference_id: string | null; // invoice_id or purchase order id
-  reference_type: string | null; // "invoice", "purchase", "adjustment"
+  reference_id: string | null;
+  reference_type: string | null;
   notes: string | null;
   created_by: string;
   created_at: string;
-  // Joined
   product?: Product;
 }
 
@@ -164,9 +187,23 @@ export interface Setting {
   value: Json;
   category: SettingCategory;
   description: string | null;
-  is_public: boolean; // if true, accessible without auth
+  is_public: boolean;
   created_at: string;
   updated_at: string;
+}
+
+// ─────────────────────────────────────────────
+// Notification
+// ─────────────────────────────────────────────
+
+export interface Notification {
+  id: string;
+  user_id: string;
+  type: "error" | "warning" | "info";
+  title: string;
+  message: string;
+  is_read: boolean;
+  created_at: string;
 }
 
 // ─────────────────────────────────────────────
@@ -202,6 +239,7 @@ export type Database = {
         };
         Relationships: [];
       };
+
       categories: {
         Row: Category;
         Insert: {
@@ -224,6 +262,7 @@ export type Database = {
         };
         Relationships: [];
       };
+
       products: {
         Row: Product;
         Insert: {
@@ -266,6 +305,7 @@ export type Database = {
         };
         Relationships: [];
       };
+
       customers: {
         Row: Customer;
         Insert: {
@@ -290,7 +330,8 @@ export type Database = {
         Update: {
           id?: string;
           name?: string;
-          email?: string | null;
+          email?: string;
+          full_name?: string;
           phone?: string | null;
           gstin?: string | null;
           billing_address?: string | null;
@@ -308,6 +349,7 @@ export type Database = {
         };
         Relationships: [];
       };
+
       invoices: {
         Row: Invoice;
         Insert: {
@@ -348,6 +390,7 @@ export type Database = {
         };
         Relationships: [];
       };
+
       invoice_items: {
         Row: InvoiceItem;
         Insert: {
@@ -380,6 +423,7 @@ export type Database = {
         };
         Relationships: [];
       };
+
       payments: {
         Row: Payment;
         Insert: {
@@ -410,6 +454,7 @@ export type Database = {
         };
         Relationships: [];
       };
+
       stock_movements: {
         Row: StockMovement;
         Insert: {
@@ -440,6 +485,7 @@ export type Database = {
         };
         Relationships: [];
       };
+
       settings: {
         Row: Setting;
         Insert: {
@@ -464,9 +510,35 @@ export type Database = {
         };
         Relationships: [];
       };
+
+      notifications: {
+        Row: Notification;
+        Insert: {
+          id?: string;
+          user_id: string;
+          type?: "error" | "warning" | "info";
+          title: string;
+          message: string;
+          is_read?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          type?: "error" | "warning" | "info";
+          title?: string;
+          message?: string;
+          is_read?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
+
     Views: Record<string, never>;
+
     Functions: Record<string, never>;
+
     Enums: {
       user_role: UserRole;
       invoice_status: InvoiceStatus;
