@@ -66,10 +66,6 @@ export default function InvoicesPage() {
     return () => clearTimeout(timer);
   }, [search, customerFilter]);
 
-  useEffect(() => {
-    setPage(1);
-  }, [statusFilter, startDateFilter, endDateFilter]);
-
   const [selectedInvoice, setSelectedInvoice] =
     useState<InvoiceWithDetails | null>(null);
   const [isFetchingDetail, setIsFetchingDetail] = useState(false);
@@ -306,7 +302,10 @@ export default function InvoicesPage() {
           <div className="relative">
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(1);
+              }}
               className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
               <option value="all">All Statuses</option>
@@ -340,7 +339,10 @@ export default function InvoicesPage() {
             <input
               type="date"
               value={startDateFilter}
-              onChange={(e) => setStartDateFilter(e.target.value)}
+              onChange={(e) => {
+                setStartDateFilter(e.target.value);
+                setPage(1);
+              }}
               className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white"
             />
           </div>
@@ -350,7 +352,10 @@ export default function InvoicesPage() {
             <input
               type="date"
               value={endDateFilter}
-              onChange={(e) => setEndDateFilter(e.target.value)}
+              onChange={(e) => {
+                setEndDateFilter(e.target.value);
+                setPage(1);
+              }}
               className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white"
             />
           </div>
