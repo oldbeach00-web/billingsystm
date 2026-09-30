@@ -13,6 +13,11 @@ export default function DashboardError({
   reset: () => void;
 }) {
   useEffect(() => {
+    void createErrorNotification(
+      "Test Notification",
+      "This is a temporary notification test."
+    );
+
     console.error(
       "Dashboard Module Error Caught by Error Boundary:",
       error

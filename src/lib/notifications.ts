@@ -3,9 +3,16 @@ import type { Notification } from "@/types/database";
 
 export async function getNotifications(): Promise<Notification[]> {
   try {
+    const { data: userData, error: userError } = await db.auth.getUser();
+
+    if (userError || !userData.user) {
+      return [];
+    }
+
     const { data, error } = await db
       .from("notifications")
       .select("*")
+      .eq("user_id", userData.user.id)
       .order("created_at", { ascending: false })
       .limit(20);
 
@@ -21,9 +28,16 @@ export async function getNotifications(): Promise<Notification[]> {
 
 export async function getUnreadNotificationCount(): Promise<number> {
   try {
+    const { data: userData, error: userError } = await db.auth.getUser();
+
+    if (userError || !userData.user) {
+      return 0;
+    }
+
     const { data, error } = await db
       .from("notifications")
       .select("id")
+      .eq("user_id", userData.user.id)
       .eq("is_read", false);
 
     if (error || !data) {
@@ -40,10 +54,17 @@ export async function markNotificationAsRead(
   notificationId: string
 ): Promise<boolean> {
   try {
+    const { data: userData, error: userError } = await db.auth.getUser();
+
+    if (userError || !userData.user) {
+      return false;
+    }
+
     const { error } = await db
       .from("notifications")
       .update({ is_read: true })
-      .eq("id", notificationId);
+      .eq("id", notificationId)
+      .eq("user_id", userData.user.id);
 
     return !error;
   } catch {
