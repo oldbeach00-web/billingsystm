@@ -19,6 +19,7 @@ import {
 import { formatCurrency } from "@/lib/utils";
 
 interface CustomerWithTotals extends Customer {
+  customer_type: "retail" | "regular";
   total_purchases: number;
   total_paid: number;
   total_balance: number;
@@ -87,7 +88,7 @@ export default function CustomersPage() {
       // Fetch invoices only for the current page of customers to calculate balances
       const customerIds = customersList.map(c => c.id);
       const { data: invData, error: invErr } = await db.from("invoices")
-        .select("customer_id, total_amount, amount_paid, amount_due, status")
+        .select("customer_id, customer_type, total_amount, amount_paid, amount_due, status")
         .in("customer_id", customerIds)
         .neq("status", "cancelled");
 
@@ -98,12 +99,14 @@ export default function CustomersPage() {
       // Calculate totals per customer
       const mapped: CustomerWithTotals[] = customersList.map((c) => {
         const custInvs = invs.filter((inv) => inv.customer_id === c.id);
+        const customer_type = custInvs.some((inv) => inv.customer_type === "retail") ? "retail" : "regular";
         const total_purchases = custInvs.reduce((sum, inv) => sum + Number(inv.total_amount || 0), 0);
         const total_paid = custInvs.reduce((sum, inv) => sum + Number(inv.amount_paid || 0), 0);
         const total_balance = custInvs.reduce((sum, inv) => sum + Number(inv.amount_due ?? Math.max(0, (inv.total_amount || 0) - (inv.amount_paid || 0))), 0);
 
         return {
           ...c,
+          customer_type,
           total_purchases,
           total_paid,
           total_balance,
@@ -151,6 +154,18 @@ export default function CustomersPage() {
       return;
     }
 
+    if (!editingCustomer) {
+      const phone = formData.phone.trim();
+      if (!phone) {
+        setModalError("Phone number is required.");
+        return;
+      }
+      if (!/^\d{10}$/.test(phone)) {
+        setModalError("Please enter a valid 10-digit phone number.");
+        return;
+      }
+    }
+
     setIsSaving(true);
     setModalError(null);
 
@@ -174,7 +189,7 @@ export default function CustomersPage() {
         setIsSaving(false);
       } else {
         setIsModalOpen(false);
-        await setTimeout(() => fetchCustomers(), 0);
+        await fetchCustomers();
       }
     } else {
       const { error: insertErr } = await (db.from("customers") as { update: (data: unknown) => { eq: (k: string, v: string) => Promise<{error: {message: string} | null}> }, insert: (data: unknown[]) => Promise<{error: {message: string} | null}>, select: (s: string) => { eq: (k: string, v: string) => { single: () => Promise<{data: unknown, error: {message: string} | null}> } } }).insert([payload]);
@@ -184,7 +199,7 @@ export default function CustomersPage() {
         setIsSaving(false);
       } else {
         setIsModalOpen(false);
-        await setTimeout(() => fetchCustomers(), 0);
+        await fetchCustomers();
       }
     }
 
@@ -198,7 +213,7 @@ export default function CustomersPage() {
     if (delErr) {
       alert("Error deleting customer: " + delErr.message);
     } else {
-      await setTimeout(() => fetchCustomers(), 0);
+      await fetchCustomers();
     }
   };
 
@@ -270,7 +285,7 @@ export default function CustomersPage() {
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead className="bg-gray-50 dark:bg-gray-900/50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Customer Name</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Customer Name</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Customer Type</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Phone</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Address</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">GSTIN</th>
@@ -287,13 +302,16 @@ export default function CustomersPage() {
                       {c.name}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {c.phone || "—"}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 max-w-xs truncate">
-                      {c.billing_address || "—"}
+                      {c.customer_type === "retail" ? "Retail / Walk-in" : "Regular Customer"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {c.gstin || "—"}
+                      {c.phone || "_"}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 max-w-xs truncate">
+                      {c.billing_address || "_"}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                      {c.gstin || "_"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-gray-900 dark:text-white">
                       {formatCurrency(c.total_purchases)}
@@ -379,7 +397,7 @@ export default function CustomersPage() {
             <form onSubmit={handleSaveCustomer} className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Customer Name *
+                  Customer Name (required)
                 </label>
                 <input
                   type="text"
@@ -394,10 +412,11 @@ export default function CustomersPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Phone Number
+                    Phone Number (required)
                   </label>
                   <input
                     type="text"
+                    required={!editingCustomer}
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -454,7 +473,7 @@ export default function CustomersPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isSaving || !formData.name.trim()}
+                  disabled={isSaving || !formData.name.trim() || (!editingCustomer && !/^\d{10}$/.test(formData.phone.trim()))}
                   className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
                 >
                   {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
@@ -468,3 +487,28 @@ export default function CustomersPage() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
