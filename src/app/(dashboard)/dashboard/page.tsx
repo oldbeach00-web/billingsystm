@@ -98,7 +98,7 @@ export default async function DashboardPage() {
     now.getFullYear(),
     now.getMonth(),
     now.getDate()
-  ).toISOString();
+  );
 
   let totalSales = 0;
   let todaysSales = 0;
@@ -109,7 +109,7 @@ export default async function DashboardPage() {
     if (inv.status !== "cancelled" && inv.status !== "draft") {
       totalSales += Number(inv.total_amount);
 
-      if (new Date(inv.created_at) >= new Date(startOfToday)) {
+      if (new Date(inv.created_at) >= startOfToday) {
         todaysSales += Number(inv.total_amount);
       }
     }
