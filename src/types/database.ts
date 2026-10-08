@@ -117,6 +117,7 @@ export interface Invoice {
   id: string;
   invoice_number: string;
   customer_id: string;
+  customer_type: "retail" | "regular";
   status: InvoiceStatus;
   issue_date: string;
   due_date: string;
