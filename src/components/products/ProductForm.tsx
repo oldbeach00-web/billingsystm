@@ -38,6 +38,41 @@ export function ProductForm({ initialData }: ProductFormProps) {
     });
     }, []);
 
+  const getProductCode = (name: string) => {
+    const ignoredWords = new Set([
+      "FRESH", "HYBRID", "PREMIUM", "REFINED", "WHITE", "RED",
+      "GREEN", "BLUE", "SUNFLOWER", "COOKING", "NEW", "PURE"
+    ]);
+
+    const words = name
+      .toUpperCase()
+      .replace(/[^A-Z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(Boolean);
+
+    return (
+      [...words]
+        .reverse()
+        .find((word) => !ignoredWords.has(word) && !/^\d+$/.test(word))
+        ?.slice(0, 20) || "ITEM"
+    );
+  };
+  const generateNextSku = async (productCode: string) => {
+    const prefix = `GROC-${productCode}-`;
+    const { data } = await db
+      .from("products")
+      .select("sku")
+      .like("sku", `${prefix}%`);
+
+    const numbers = ((data || []) as Array<{ sku: string | null }>)
+      .map((row) => row.sku?.match(new RegExp(`^GROC-${productCode}-(\\d{3})$`))?.[1])
+      .filter(Boolean)
+      .map((value) => Number(value));
+
+    const nextNumber = Math.max(0, ...numbers) + 1;
+
+    return `${prefix}${String(nextNumber).padStart(3, "0")}`;
+  };
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
@@ -65,7 +100,10 @@ export function ProductForm({ initialData }: ProductFormProps) {
       apiError = updateError;
     } else {
       const { error: insertError } = await (db.from("products") as { update: (data: unknown) => { eq: (k: string, v: string) => Promise<{error: {message: string} | null}> }, insert: (data: unknown[]) => Promise<{error: {message: string} | null}>, select: (s: string) => { eq: (k: string, v: string) => { single: () => Promise<{data: unknown, error: {message: string} | null}> } } })
-        .insert([payload]);
+        .insert([{
+          ...payload,
+          sku: await generateNextSku(getProductCode(formData.name)),
+        }]);
       apiError = insertError;
     }
 
@@ -144,9 +182,9 @@ export function ProductForm({ initialData }: ProductFormProps) {
                 <input
                   type="text"
                   name="sku"
-                  required
                   value={formData.sku}
                   onChange={handleChange}
+                  readOnly={!initialData}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
