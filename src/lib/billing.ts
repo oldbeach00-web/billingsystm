@@ -103,8 +103,25 @@ export function computePaymentStatus(total: number, paid: number): PaymentStatus
   return "due";
 }
 
-/** YYYY-MM-DD in the browser's local timezone (not UTC). */
-export function localDateString(date: Date = new Date()): string {
+/** Timezone used where there's no browser (server rendering). */
+export const APP_TIME_ZONE = process.env.NEXT_PUBLIC_APP_TIMEZONE || "Asia/Kolkata";
+
+/**
+ * YYYY-MM-DD for a calendar date — in the browser's local timezone by
+ * default, or in `timeZone` when given. Never UTC (toISOString would shift
+ * dates before 05:30 IST to the previous day).
+ */
+export function localDateString(date: Date = new Date(), timeZone?: string): string {
+  if (timeZone) {
+    // en-CA formats as YYYY-MM-DD
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(date);
+  }
+
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");

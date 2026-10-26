@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { db } from "@/lib/db";
+import { db, fetchAllRows } from "@/lib/db";
 import type { Product, Category } from "@/types/database";
 import {
   Plus,
@@ -40,11 +40,14 @@ export default function ProductsPage() {
       .from("categories")
       .select("*");
 
-    const { data: prods, error: prodsError } = await db
-      .from("products")
-      .select("*, category:categories(*)")
-      .order("created_at", { ascending: false })
-      .limit(1000);
+    // Archived (soft-deleted) products are hidden
+    const { data: prods, error: prodsError } = await fetchAllRows<Product>(() =>
+      db
+        .from("products")
+        .select("*, category:categories(*)")
+        .eq("is_active", true)
+        .order("created_at", { ascending: false })
+    );
 
     if (prodsError) {
       return {
@@ -106,17 +109,22 @@ export default function ProductsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this product?")) {
+    if (
+      !window.confirm(
+        "Archive this product? It will be hidden from billing and lists, but past invoices and stock history are kept."
+      )
+    ) {
       return;
     }
 
+    // Soft delete: a hard delete would break or orphan past invoice lines
     const { error } = await db
       .from("products")
-      .delete()
+      .update({ is_active: false })
       .eq("id", id);
 
     if (error) {
-      alert("Error deleting product: " + error.message);
+      alert("Error archiving product: " + error.message);
     } else {
       await refreshData();
     }
@@ -312,6 +320,7 @@ export default function ProductsPage() {
                     <button
                       onClick={() => handleDelete(prod.id)}
                       className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 inline-block"
+                      title="Archive Product"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>

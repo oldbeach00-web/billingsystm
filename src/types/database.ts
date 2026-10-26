@@ -129,6 +129,10 @@ export interface Invoice {
   amount_due: number;
   notes: string | null;
   terms: string | null;
+  /** GST state code of the place of supply (set by create_invoice) */
+  place_of_supply?: string | null;
+  /** 'intra' = CGST + SGST, 'inter' = IGST (set by create_invoice) */
+  supply_type?: "intra" | "inter" | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -141,6 +145,8 @@ export interface InvoiceItem {
   id: string;
   invoice_id: string;
   product_id: string | null;
+  /** HSN/SAC snapshot taken when the invoice was created */
+  hsn_sac?: string | null;
   description: string;
   quantity: number;
   unit_price: number;

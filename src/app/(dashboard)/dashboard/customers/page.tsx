@@ -17,6 +17,7 @@ import {
   ChevronRight
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+import { isValidGstin } from "@/lib/gst";
 
 interface CustomerWithTotals extends Customer {
   customer_type: "retail" | "regular";
@@ -65,10 +66,17 @@ export default function CustomersPage() {
     setError(null);
 
     try {
-      let query = db.from("customers").select("*", { count: "exact" });
-      
-      if (debouncedSearch) {
-        query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%,gstin.ilike.%${debouncedSearch}%,billing_address.ilike.%${debouncedSearch}%`);
+      // Archived (soft-deleted) customers are hidden
+      let query = db
+        .from("customers")
+        .select("*", { count: "exact" })
+        .eq("is_active", true);
+
+      // Strip characters with meaning in PostgREST filter syntax
+      const term = debouncedSearch.replace(/[,()*%\\:"]/g, " ").trim();
+
+      if (term) {
+        query = query.or(`name.ilike.%${term}%,phone.ilike.%${term}%,gstin.ilike.%${term}%,billing_address.ilike.%${term}%`);
       }
 
       query = query.order("name").range((page - 1) * pageSize, page * pageSize - 1);
@@ -90,7 +98,7 @@ export default function CustomersPage() {
       const { data: invData, error: invErr } = await db.from("invoices")
         .select("customer_id, customer_type, total_amount, amount_paid, amount_due, status")
         .in("customer_id", customerIds)
-        .neq("status", "cancelled");
+        .not("status", "in", "(draft,cancelled)");
 
       if (invErr) throw new Error(invErr.message);
 
@@ -166,6 +174,11 @@ export default function CustomersPage() {
       }
     }
 
+    if (formData.gstin.trim() && !isValidGstin(formData.gstin)) {
+      setModalError("Please enter a valid 15-character GSTIN (e.g. 27ABCDE1234F1Z5).");
+      return;
+    }
+
     setIsSaving(true);
     setModalError(null);
 
@@ -173,7 +186,7 @@ export default function CustomersPage() {
       name: formData.name.trim(),
       phone: formData.phone.trim() || null,
       billing_address: formData.billing_address.trim() || null,
-      gstin: formData.gstin.trim() || null,
+      gstin: formData.gstin.trim().toUpperCase() || null,
       email: formData.email.trim() || null,
       notes: formData.notes.trim() || null,
       country: "India",
@@ -207,11 +220,12 @@ export default function CustomersPage() {
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!window.confirm(`Are you sure you want to delete customer "${name}"?`)) return;
+    if (!window.confirm(`Archive customer "${name}"? They will be hidden from lists and billing, but their invoices are kept.`)) return;
 
-    const { error: delErr } = await db.from("customers").delete().eq("id", id);
+    // Soft delete: a hard delete would break or orphan their invoices
+    const { error: delErr } = await db.from("customers").update({ is_active: false }).eq("id", id);
     if (delErr) {
-      alert("Error deleting customer: " + delErr.message);
+      alert("Error archiving customer: " + delErr.message);
     } else {
       await fetchCustomers();
     }
@@ -333,7 +347,7 @@ export default function CustomersPage() {
                       <button
                         onClick={() => handleDelete(c.id, c.name)}
                         className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 inline-block"
-                        title="Delete Customer"
+                        title="Archive Customer"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>

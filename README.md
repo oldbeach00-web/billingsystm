@@ -38,6 +38,9 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 # Dedicated Supabase Auth user the app signs in as after a successful login
 SUPABASE_ADMIN_EMAIL=admin@yourshop.com
 SUPABASE_ADMIN_PASSWORD=strong-password
+
+# Timezone for "today" on server-rendered pages (default Asia/Kolkata)
+NEXT_PUBLIC_APP_TIMEZONE=Asia/Kolkata
 ```
 
 ### Database setup
@@ -48,7 +51,12 @@ SUPABASE_ADMIN_PASSWORD=strong-password
    and run that file in the SQL editor. It locks every table to that user
    (Row Level Security) and adds the atomic `create_invoice`, `record_payment`
    and `adjust_stock` functions the app requires.
-3. Authentication → Providers → Email: turn **off** "Allow new users to sign up".
+3. Run `supabase/migrations/20261026000100_gst_details_and_cancellation.sql`.
+   It stores the HSN code and place of supply (CGST + SGST vs IGST) on each new
+   invoice and adds `cancel_invoice`, which voids an invoice and returns its stock.
+4. In Settings, enter your shop name, address and a valid GSTIN — the GSTIN's
+   state code decides whether invoices charge CGST + SGST or IGST.
+5. Authentication → Providers → Email: turn **off** "Allow new users to sign up".
 
 ---
 

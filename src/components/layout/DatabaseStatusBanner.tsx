@@ -4,17 +4,34 @@ import { AlertTriangle } from "lucide-react";
 import { isDbConfigured } from "@/lib/db";
 
 interface DatabaseStatusBannerProps {
+  /** A page's load error. Omit in the layout, which reports configuration. */
   error?: string | null;
 }
 
+/**
+ * Rendered once in the dashboard layout (no `error`) to warn on every page
+ * when the database isn't configured, and by individual pages to show their
+ * own load errors.
+ */
 export function DatabaseStatusBanner({ error }: DatabaseStatusBannerProps) {
   const isConfigured = isDbConfigured();
-  const isFetchError =
-    error?.includes("Failed to fetch") ||
-    error?.includes("TypeError") ||
-    !isConfigured;
+  const isLayoutBanner = error === undefined;
 
-  if (!isFetchError && !error) return null;
+  let message: string | null = null;
+
+  if (isLayoutBanner) {
+    if (!isConfigured) {
+      message =
+        "Database connection is not configured. Data shown is empty and nothing can be saved.";
+    }
+  } else if (error && isConfigured) {
+    // When unconfigured, the layout banner already explains the problem
+    message = error.includes("Failed to fetch")
+      ? "Could not reach the database. Check your internet connection."
+      : `Could not load data: ${error}`;
+  }
+
+  if (!message) return null;
 
   return (
     <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-sm space-y-2 mb-6">
@@ -25,7 +42,7 @@ export function DatabaseStatusBanner({ error }: DatabaseStatusBannerProps) {
             Database Status
           </p>
           <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
-            Database connection is not configured yet.
+            {message}
           </p>
         </div>
       </div>

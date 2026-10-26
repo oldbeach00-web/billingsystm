@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { db } from "@/lib/db";
+import { db, fetchAllRows } from "@/lib/db";
 import type { Customer, Product } from "@/types/database";
 import {
   Search,
@@ -26,6 +26,7 @@ import {
   toPaise,
 } from "@/lib/billing";
 import { BillPreview } from "@/components/invoices/BillPreview";
+import { isValidGstin } from "@/lib/gst";
 
 // ─── Draft Persistence ────────────────────────────────────────────────────────
 const DRAFT_KEY = "new_invoice_draft_v1";
@@ -167,18 +168,12 @@ export default function NewInvoicePage() {
 
     const loadData = async () => {
       const [{ data: prods }, { data: custs }] = await Promise.all([
-        db
-          .from("products")
-          .select("*")
-          .eq("is_active", true)
-          .order("name")
-          .limit(1000),
-        db
-          .from("customers")
-          .select("*")
-          .eq("is_active", true)
-          .order("name")
-          .limit(1000),
+        fetchAllRows<Product>(() =>
+          db.from("products").select("*").eq("is_active", true).order("name")
+        ),
+        fetchAllRows<Customer>(() =>
+          db.from("customers").select("*").eq("is_active", true).order("name")
+        ),
       ]);
 
       if (cancelled) return;
@@ -500,6 +495,11 @@ export default function NewInvoicePage() {
   ) => {
     if (isSaving) return;
 
+    if (!customer.id && customer.gstin.trim() && !isValidGstin(customer.gstin)) {
+      setError("Please enter a valid 15-character customer GSTIN, or leave it blank.");
+      return;
+    }
+
     if (!customer.name.trim()) {
       setError(
         "Please add a customer before confirming."
@@ -599,7 +599,7 @@ export default function NewInvoicePage() {
               phone: customer.phone || null,
               billing_address:
                 customer.billing_address || null,
-              gstin: customer.gstin || null,
+              gstin: customer.gstin.trim().toUpperCase() || null,
               country: "India",
             },
           ])

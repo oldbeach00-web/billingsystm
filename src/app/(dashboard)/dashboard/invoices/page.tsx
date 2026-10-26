@@ -13,6 +13,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Ban,
 } from "lucide-react";
 import Link from "next/link";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
@@ -66,6 +67,8 @@ export default function InvoicesPage() {
     return () => clearTimeout(timer);
   }, [search, customerFilter]);
 
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
   const [selectedInvoice, setSelectedInvoice] =
     useState<InvoiceWithDetails | null>(null);
   const [isFetchingDetail, setIsFetchingDetail] = useState(false);
@@ -73,6 +76,11 @@ export default function InvoicesPage() {
   const fetchInvoices = useCallback(async () => {
     setIsLoading(true);
     setError(null);
+
+    // Characters with meaning in PostgREST filter syntax would break (or
+    // alter) the or() filters below
+    const searchTerm = debouncedSearch.replace(/[,()*%\\:"]/g, " ").trim();
+    const customerTerm = debouncedCustomerFilter.replace(/[,()*%\\:"]/g, " ").trim();
 
     try {
       let query = db
@@ -91,11 +99,11 @@ export default function InvoicesPage() {
         query = query.lte("issue_date", endDateFilter);
       }
 
-      if (debouncedCustomerFilter) {
+      if (customerTerm) {
         const { data: matchedCustomers } = await db
           .from("customers")
           .select("id")
-          .ilike("name", `%${debouncedCustomerFilter}%`);
+          .ilike("name", `%${customerTerm}%`);
 
         const customers = (matchedCustomers ?? []) as CustomerIdRow[];
         const cIds = customers.map((c) => c.id);
@@ -110,12 +118,12 @@ export default function InvoicesPage() {
         }
       }
 
-      if (debouncedSearch) {
+      if (searchTerm) {
         const { data: matchedCustomers } = await db
           .from("customers")
           .select("id")
           .or(
-            `name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%`
+            `name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`
           );
 
         const customers = (matchedCustomers ?? []) as CustomerIdRow[];
@@ -123,14 +131,14 @@ export default function InvoicesPage() {
 
         if (cIds.length > 0) {
           query = query.or(
-            `invoice_number.ilike.%${debouncedSearch}%,customer_id.in.(${cIds.join(
+            `invoice_number.ilike.%${searchTerm}%,customer_id.in.(${cIds.join(
               ","
             )})`
           );
         } else {
           query = query.ilike(
             "invoice_number",
-            `%${debouncedSearch}%`
+            `%${searchTerm}%`
           );
         }
       }
@@ -232,6 +240,53 @@ export default function InvoicesPage() {
       setSelectedInvoice(mapped);
     } finally {
       setIsFetchingDetail(false);
+    }
+  };
+
+  const handleCancelInvoice = async (inv: InvoiceWithDetails) => {
+    const reason = window.prompt(
+      `Cancel invoice #${inv.invoice_number}?\n\nStock on this invoice will be returned. Enter the reason for cancelling:`
+    );
+
+    if (reason === null) return;
+
+    if (!reason.trim()) {
+      alert("A reason is required to cancel an invoice.");
+      return;
+    }
+
+    const paid = Number(inv.amount_paid || 0);
+    let refund = false;
+
+    if (paid > 0) {
+      refund = window.confirm(
+        `This invoice has ${formatCurrency(paid)} paid. Cancelling will mark those payments as REFUNDED.\n\nHave you refunded the customer?`
+      );
+      if (!refund) return;
+    }
+
+    setCancellingId(inv.id);
+
+    try {
+      const { error: rpcErr } = await db.rpc("cancel_invoice", {
+        p_invoice_id: inv.id,
+        p_reason: reason.trim(),
+        p_refund_payments: refund,
+      });
+
+      if (rpcErr) {
+        const rpcError = rpcErr as { code?: string; message?: string };
+        alert(
+          rpcError.code === "PGRST202"
+            ? "The database is missing the cancel_invoice function. Apply the migrations in supabase/migrations first."
+            : rpcError.message || "Error cancelling invoice."
+        );
+        return;
+      }
+
+      await fetchInvoices();
+    } finally {
+      setCancellingId(null);
     }
   };
 
@@ -428,9 +483,12 @@ export default function InvoicesPage() {
                   const status = inv.status || "due";
                   const totalAmt = Number(inv.total_amount || 0);
                   const paidAmt = Number(inv.amount_paid || 0);
-                  const balanceAmt = Number(
-                    inv.amount_due ?? Math.max(0, totalAmt - paidAmt)
-                  );
+                  const balanceAmt =
+                    status === "cancelled"
+                      ? 0
+                      : Number(
+                          inv.amount_due ?? Math.max(0, totalAmt - paidAmt)
+                        );
 
                   return (
                     <tr
@@ -472,7 +530,9 @@ export default function InvoicesPage() {
                             (status === "due" || status === "sent") &&
                               "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
                             status === "draft" &&
-                              "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+                              "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300",
+                            status === "cancelled" &&
+                              "bg-gray-200 text-gray-500 line-through dark:bg-gray-700 dark:text-gray-400"
                           )}
                         >
                           {status === "paid"
@@ -481,7 +541,9 @@ export default function InvoicesPage() {
                               ? "PARTIALLY PAID"
                               : status === "draft"
                                 ? "DRAFT"
-                                : "DUE"}
+                                : status === "cancelled"
+                                  ? "CANCELLED"
+                                  : "DUE"}
                         </span>
                       </td>
 
@@ -494,6 +556,21 @@ export default function InvoicesPage() {
                           <Printer className="w-3.5 h-3.5" />
                           Print / Reprint
                         </button>
+
+                        {status !== "cancelled" && (
+                          <button
+                            onClick={() => handleCancelInvoice(inv)}
+                            disabled={cancellingId === inv.id}
+                            className="ml-2 inline-flex items-center gap-1 px-3 py-1.5 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 rounded-lg transition-colors text-xs font-semibold disabled:opacity-50"
+                          >
+                            {cancellingId === inv.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Ban className="w-3.5 h-3.5" />
+                            )}
+                            Cancel
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

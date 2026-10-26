@@ -42,12 +42,22 @@ type QueryResult = {
   count?: number | null;
 };
 
-function createChainable(): unknown {
-  const resultPromise = Promise.resolve({
-    data: [],
-    error: null,
-    count: 0,
-  });
+const NOT_CONFIGURED_ERROR = {
+  message:
+    "Database is not configured. Nothing was saved. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+  code: "DB_NOT_CONFIGURED",
+};
+
+const MUTATIONS = new Set(["insert", "update", "upsert", "delete"]);
+
+// Stand-in query builder used when Supabase isn't configured. Reads return
+// empty results; writes return an error so nothing ever reports a fake save.
+function createChainable(isWrite = false): unknown {
+  const resultPromise = Promise.resolve(
+    isWrite
+      ? { data: null, error: NOT_CONFIGURED_ERROR, count: 0 }
+      : { data: [], error: null, count: 0 }
+  );
 
   const handler: ProxyHandler<any> = {
     get(_target, prop) {
@@ -63,12 +73,16 @@ function createChainable(): unknown {
           resultPromise.catch(onrejected);
       }
 
-      if (prop === "single") {
-        return () => Promise.resolve({ data: null, error: null });
+      if (prop === "single" || prop === "maybeSingle") {
+        return () =>
+          Promise.resolve({
+            data: null,
+            error: isWrite ? NOT_CONFIGURED_ERROR : null,
+          });
       }
 
-      if (prop === "maybeSingle") {
-        return () => Promise.resolve({ data: null, error: null });
+      if (typeof prop === "string" && MUTATIONS.has(prop)) {
+        return () => createChainable(true);
       }
 
       return () => proxy;
@@ -171,9 +185,40 @@ export const db = {
 
     return Promise.resolve({
       data: null,
-      error: null,
+      error: NOT_CONFIGURED_ERROR,
     });
   },
 };
+
+const PAGE_SIZE = 1000;
+
+/**
+ * Fetches every row of a query, page by page. Supabase returns at most 1000
+ * rows per request, so a plain select silently truncates large tables.
+ * `build` must return a fresh, ordered query for each call.
+ */
+export async function fetchAllRows<T>(
+  build: () => {
+    range: (
+      from: number,
+      to: number
+    ) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
+  }
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  const rows: T[] = [];
+
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await build().range(from, from + PAGE_SIZE - 1);
+
+    if (error) return { data: rows, error };
+
+    const page = (data as T[] | null) ?? [];
+    rows.push(...page);
+
+    if (page.length < PAGE_SIZE) break;
+  }
+
+  return { data: rows, error: null };
+}
 
 export const isDbConfigured = isConfigured;

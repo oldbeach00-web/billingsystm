@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { db } from "@/lib/db";
+import { db, fetchAllRows } from "@/lib/db";
 import type { Invoice, InvoiceItem, Product, Customer } from "@/types/database";
 import {
   BarChart3,
@@ -50,14 +50,21 @@ export default function ReportsPage() {
         { data: prods, error: pErr },
         { data: custs, error: cErr },
       ] = await Promise.all([
-        db
-          .from("invoices")
-          .select("*")
-          .neq("status", "cancelled")
-          .order("issue_date", { ascending: false }),
-        db.from("invoice_items").select("*, product:products(*)"),
-        db.from("products").select("*").order("name"),
-        db.from("customers").select("*").order("name"),
+        // Drafts aren't issued and cancelled invoices are void: neither is a sale.
+        // Every query is paged, since Supabase caps a select at 1000 rows.
+        fetchAllRows<Invoice>(() =>
+          db
+            .from("invoices")
+            .select("*")
+            .not("status", "in", "(draft,cancelled)")
+            .order("issue_date", { ascending: false })
+            .order("id")
+        ),
+        fetchAllRows<InvoiceItemWithProductRow>(() =>
+          db.from("invoice_items").select("*, product:products(*)").order("id")
+        ),
+        fetchAllRows<Product>(() => db.from("products").select("*").order("name").order("id")),
+        fetchAllRows<Customer>(() => db.from("customers").select("*").order("name").order("id")),
       ]);
 
       if (iErr) throw new Error(iErr.message);
