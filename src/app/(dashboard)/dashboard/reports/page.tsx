@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
+import { localDateString } from "@/lib/billing";
 
 type ReportTab = "products" | "customers" | "stock" | "low_stock";
 
@@ -115,29 +116,21 @@ export default function ReportsPage() {
   );
 
   // Date helper thresholds
-  const todayStr = new Date().toISOString().split("T")[0];
+  // All boundaries are local calendar dates (issue_date is a local date);
+  // toISOString() would shift them to the previous day in IST.
   const now = new Date();
+  const todayStr = localDateString(now);
 
-  const sevenDaysAgo = new Date();
+  const sevenDaysAgo = new Date(now);
   sevenDaysAgo.setDate(now.getDate() - 7);
 
-  const sevenDaysAgoStr = sevenDaysAgo.toISOString().split("T")[0];
+  const sevenDaysAgoStr = localDateString(sevenDaysAgo);
 
-  const startOfMonthStr = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    1
-  )
-    .toISOString()
-    .split("T")[0];
+  const startOfMonthStr = localDateString(
+    new Date(now.getFullYear(), now.getMonth(), 1)
+  );
 
-  const startOfYearStr = new Date(
-    now.getFullYear(),
-    0,
-    1
-  )
-    .toISOString()
-    .split("T")[0];
+  const startOfYearStr = localDateString(new Date(now.getFullYear(), 0, 1));
 
   // Calculated Sales Aggregates
   const dailySales = invoices

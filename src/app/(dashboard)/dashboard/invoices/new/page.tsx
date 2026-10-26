@@ -15,7 +15,16 @@ import {
   UserPlus,
   CheckCircle,
 } from "lucide-react";
-import { cn, formatCurrency, generateInvoiceNumber } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
+import {
+  clampNumber,
+  computeInvoiceTotals,
+  computeLineAmounts,
+  computePaymentStatus,
+  localDateString,
+  round2,
+  toPaise,
+} from "@/lib/billing";
 import { BillPreview } from "@/components/invoices/BillPreview";
 
 // ─── Draft Persistence ────────────────────────────────────────────────────────
@@ -45,37 +54,39 @@ export interface BillCustomer {
   gstin: string;
 }
 
-interface ProductStockData {
-  id: string;
-  name: string;
-  stock_quantity: number;
-  is_active: boolean;
-}
-
 interface CustomerInsertData {
-  id: string;
-}
-
-interface InvoiceInsertData {
   id: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Keeps every numeric input inside its valid range (no negative quantities,
+// prices or tax; percentages within 0–100).
+function sanitizeLine<T extends BillLineItem | Omit<BillLineItem, "discount_amount" | "tax_amount" | "total_amount">>(
+  line: T
+): T {
+  return {
+    ...line,
+    quantity: clampNumber(Number(line.quantity), 0),
+    unit_price: clampNumber(Number(line.unit_price), 0),
+    discount_percentage: clampNumber(Number(line.discount_percentage), 0, 100),
+    tax_rate: clampNumber(Number(line.tax_rate), 0, 100),
+  };
+}
+
+// Line amounts before the overall discount (the overall discount is applied
+// in pricedLines below, before GST).
 function computeLine(
   line: Omit<BillLineItem, "discount_amount" | "tax_amount" | "total_amount">
 ): BillLineItem {
-  const base = line.quantity * line.unit_price;
-  const discount_amount = base * (line.discount_percentage / 100);
-  const taxable = base - discount_amount;
-  const tax_amount = taxable * (line.tax_rate / 100);
-  const total_amount = taxable + tax_amount;
+  const clean = sanitizeLine(line);
+  const amounts = computeLineAmounts(clean);
 
   return {
-    ...line,
-    discount_amount,
-    tax_amount,
-    total_amount,
+    ...clean,
+    discount_amount: amounts.discount_amount,
+    tax_amount: amounts.tax_amount,
+    total_amount: amounts.total_amount,
   };
 }
 
@@ -115,14 +126,11 @@ export default function NewInvoicePage() {
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Bill state
-  const [invoiceNumber] = useState(generateInvoiceNumber());
-  const [issueDate, setIssueDate] = useState(
-    new Date().toISOString().split("T")[0]
-  );
+  const [issueDate, setIssueDate] = useState(() => localDateString());
   const [dueDate, setDueDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 30);
-    return d.toISOString().split("T")[0];
+    return localDateString(d);
   });
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<BillLineItem[]>([newLineItem()]);
@@ -199,17 +207,13 @@ export default function NewInvoicePage() {
 
           // Re-link product objects from freshly loaded products
           const relinkedLines = saved.lines.map((l) => {
-            if (l.product_id) {
-              const freshProduct = loadedProducts.find(
-                (p) => p.id === l.product_id
-              );
+            const freshProduct = l.product_id
+              ? loadedProducts.find((p) => p.id === l.product_id)
+              : undefined;
 
-              return freshProduct
-                ? { ...l, product: freshProduct }
-                : l;
-            }
-
-            return l;
+            return computeLine(
+              freshProduct ? { ...l, product: freshProduct } : l
+            );
           });
 
           setCustomer(saved.customer);
@@ -221,7 +225,9 @@ export default function NewInvoicePage() {
               ? relinkedLines
               : [newLineItem()]
           );
-          setGlobalDiscount(saved.globalDiscount ?? 0);
+          setGlobalDiscount(
+            clampNumber(Number(saved.globalDiscount ?? 0), 0, 100)
+          );
           setIssueDate(saved.issueDate);
           setDueDate(saved.dueDate);
           setNotes(saved.notes ?? "");
@@ -303,12 +309,12 @@ export default function NewInvoicePage() {
     setCustomerSearch("");
     setLines([newLineItem()]);
     setGlobalDiscount(0);
-    setIssueDate(new Date().toISOString().split("T")[0]);
+    setIssueDate(localDateString());
 
     const d = new Date();
     d.setDate(d.getDate() + 30);
 
-    setDueDate(d.toISOString().split("T")[0]);
+    setDueDate(localDateString(d));
     setNotes("");
     setPaidAmountInput("0");
     setDraftRestored(false);
@@ -343,40 +349,38 @@ export default function NewInvoicePage() {
 
   // ─── Computed totals & Stage 6 Payment Logic ─────────────────────────────
 
-  const subtotal = lines.reduce(
-    (s, l) => s + l.quantity * l.unit_price - l.discount_amount,
-    0
+  // The overall discount is spread across lines and applied BEFORE GST, so
+  // GST is charged only on the discounted value. Amounts are rounded to paise
+  // per line; the server recomputes them identically in create_invoice().
+  const pricedLines: BillLineItem[] = lines.map((l) => {
+    const amounts = computeLineAmounts(l, globalDiscount);
+    return {
+      ...l,
+      tax_amount: amounts.tax_amount,
+      total_amount: amounts.total_amount,
+    };
+  });
+
+  const totals = computeInvoiceTotals(
+    lines
+      .filter((l) => l.description.trim())
+      .map((l) => computeLineAmounts(l, globalDiscount))
   );
 
-  const totalTax = lines.reduce((s, l) => s + l.tax_amount, 0);
+  const subtotal = totals.subtotal;
+  const totalTax = totals.tax_amount;
+  const globalDiscountAmt = totals.discount_amount;
+  const grandTotal = totals.total_amount;
 
-  const globalDiscountAmt =
-    subtotal * (globalDiscount / 100);
+  const parsedPaid = parseFloat(paidAmountInput);
+  const isPaidNegative = Number.isFinite(parsedPaid) && parsedPaid < 0;
+  const paidAmount = round2(clampNumber(parsedPaid, 0));
 
-  const grandTotal =
-    subtotal + totalTax - globalDiscountAmt;
+  const isPaidExceedingTotal = toPaise(paidAmount) > toPaise(grandTotal);
 
-  const paidAmount = parseFloat(paidAmountInput) || 0;
+  const balanceAmount = round2(Math.max(0, grandTotal - paidAmount));
 
-  const isPaidExceedingTotal =
-    paidAmount > grandTotal;
-
-  const balanceAmount = isPaidExceedingTotal
-    ? 0
-    : Math.max(0, grandTotal - paidAmount);
-
-  let computedStatus:
-    | "paid"
-    | "partially_paid"
-    | "due" = "due";
-
-  if (paidAmount >= grandTotal && grandTotal > 0) {
-    computedStatus = "paid";
-  } else if (paidAmount > 0 && balanceAmount > 0) {
-    computedStatus = "partially_paid";
-  } else {
-    computedStatus = "due";
-  }
+  const computedStatus = computePaymentStatus(grandTotal, paidAmount);
 
   // ─── Customer handlers ──────────────────────────────────────────────────
 
@@ -516,13 +520,34 @@ export default function NewInvoicePage() {
 
     const hasInvalidLine = validLines.some(
       (l) =>
-        Number(l.quantity) <= 0 ||
-        Number(l.unit_price) < 0
+        !(Number(l.quantity) > 0) ||
+        !(Number(l.unit_price) >= 0) ||
+        !(l.discount_percentage >= 0 && l.discount_percentage <= 100) ||
+        !(l.tax_rate >= 0 && l.tax_rate <= 100)
     );
 
     if (hasInvalidLine) {
       setError(
-        "Quantity must be strictly greater than 0, and prices cannot be negative."
+        "Quantity must be greater than 0, prices cannot be negative, and discount / GST must be between 0 and 100%."
+      );
+      return;
+    }
+
+    if (!(globalDiscount >= 0 && globalDiscount <= 100)) {
+      setError("Overall discount must be between 0 and 100%.");
+      return;
+    }
+
+    if (isPaidNegative) {
+      setError("Paid amount cannot be negative.");
+      return;
+    }
+
+    const isDraft = overrideStatus === "draft";
+
+    if (isDraft && paidAmount > 0) {
+      setError(
+        "A draft cannot include a payment. Set Paid Amount to 0 or confirm the invoice."
       );
       return;
     }
@@ -543,11 +568,6 @@ export default function NewInvoicePage() {
       return;
     }
 
-    const finalStatus =
-      overrideStatus === "draft"
-        ? "draft"
-        : computedStatus;
-
     setIsSaving(true);
     setError(null);
     setSuccessMessage(null);
@@ -559,65 +579,8 @@ export default function NewInvoicePage() {
 
       if (!user) {
         throw new Error(
-          "Authentication error. Please log in again."
+          "Your database session has expired. Please log out and log in again."
         );
-      }
-
-      // ── 1. PREVENT DUPLICATE INVOICE CREATION ──────────────────────────
-
-      const { data: existingInv } = await db
-        .from("invoices")
-        .select("id")
-        .eq("invoice_number", invoiceNumber)
-        .single();
-
-      if (existingInv) {
-        throw new Error(
-          `Invoice #${invoiceNumber} has already been created to prevent duplicates.`
-        );
-      }
-
-      // ── 2. PRODUCT & STOCK VALIDATION ───────────────────────────────────
-
-      if (finalStatus !== "draft") {
-        for (const line of validLines) {
-          if (line.product_id) {
-            const {
-              data: rawProdData,
-              error: prodErr,
-            } = await db
-              .from("products")
-              .select(
-                "id, name, stock_quantity, is_active"
-              )
-              .eq("id", line.product_id)
-              .single();
-
-            const prodData =
-              rawProdData as ProductStockData | null;
-
-            if (prodErr || !prodData) {
-              throw new Error(
-                `Product "${line.description}" was not found in database.`
-              );
-            }
-
-            if (!prodData.is_active) {
-              throw new Error(
-                `Product "${prodData.name}" is no longer active.`
-              );
-            }
-
-            if (
-              Number(prodData.stock_quantity) <
-              line.quantity
-            ) {
-              throw new Error(
-                `Insufficient stock for "${prodData.name}". Requested: ${line.quantity}, Available: ${prodData.stock_quantity}.`
-              );
-            }
-          }
-        }
       }
 
       // ── 3. CREATE / GET CUSTOMER ────────────────────────────────────────
@@ -660,6 +623,11 @@ export default function NewInvoicePage() {
         }
 
         customerId = newCust.id;
+
+        // Remember the new customer so a retry after a failed save doesn't
+        // create a duplicate customer record
+        const createdId = newCust.id;
+        setCustomer((c) => ({ ...c, id: createdId }));
       }
 
       if (!customerId) {
@@ -668,227 +636,63 @@ export default function NewInvoicePage() {
         );
       }
 
-      // ── 4. ATTEMPT ATOMIC STORED PROCEDURE FIRST ────────────────────────
+      // ── 4. CREATE INVOICE ATOMICALLY ────────────────────────────────────
+      // create_invoice() recomputes all amounts, checks and deducts stock
+      // under row locks, assigns the next sequential invoice number and
+      // records the initial payment — all in one transaction. There is no
+      // client-side fallback: a partial save is worse than a failed one.
 
       const itemsPayload = validLines.map((l) => ({
         product_id: l.product_id || null,
-        description: l.description,
+        description: l.description.trim(),
         quantity: l.quantity,
         unit_price: l.unit_price,
         tax_rate: l.tax_rate,
-        tax_amount: l.tax_amount,
-        discount_percentage:
-          l.discount_percentage,
-        discount_amount: l.discount_amount,
-        total_amount: l.total_amount,
+        discount_percentage: l.discount_percentage,
       }));
 
-      const {
-        data: rpcRes,
-        error: rpcErr,
-      } = await db.rpc(
-        "confirm_invoice_transaction",
+      const { data: rpcRes, error: rpcErr } = await db.rpc(
+        "create_invoice",
         {
-          p_invoice_number: invoiceNumber,
           p_customer_id: customerId,
-          p_status: finalStatus,
+          p_is_draft: isDraft,
           p_issue_date: issueDate,
           p_due_date: dueDate,
-          p_subtotal: subtotal,
-          p_tax_amount: totalTax,
-          p_discount_amount:
-            globalDiscountAmt,
-          p_total_amount: grandTotal,
-          p_amount_paid: paidAmount,
-          p_amount_due: balanceAmount,
+          p_overall_discount_pct: globalDiscount,
+          p_amount_paid: isDraft ? 0 : paidAmount,
+          p_payment_method: "cash",
           p_notes: notes || null,
-          p_created_by: user.id,
           p_items: itemsPayload,
         }
       );
 
-      if (!rpcErr && rpcRes) {
-        localStorage.removeItem(
-          DRAFT_KEY
-        );
-
-        setSuccessMessage(
-          `Invoice #${invoiceNumber} confirmed & created successfully!`
-        );
-
-        setTimeout(() => {
-          router.push(
-            "/dashboard/invoices"
-          );
-          router.refresh();
-        }, 1500);
-
-        return;
-      }
-
-      // ── 5. FALLBACK: JS SEQUENTIAL TRANSACTION LOGIC ───────────────────
-
-      const {
-        data: rawInvoice,
-        error: invErr,
-      } = await db
-        .from("invoices")
-        .insert([
-          {
-            invoice_number: invoiceNumber,
-            customer_id: customerId,
-            status: finalStatus,
-            issue_date: issueDate,
-            due_date: dueDate,
-            subtotal,
-            tax_amount: totalTax,
-            discount_amount:
-              globalDiscountAmt,
-            total_amount: grandTotal,
-            amount_paid: paidAmount,
-            notes: notes || null,
-            created_by: user.id,
-          },
-        ])
-        .select()
-        .single();
-
-      const invoice =
-        rawInvoice as InvoiceInsertData | null;
-
-      if (invErr) {
+      if (rpcErr) {
+        const rpcError = rpcErr as { code?: string; message?: string };
         throw new Error(
-          "Error creating invoice: " +
-            invErr.message
+          rpcError.code === "PGRST202"
+            ? "The database is missing the create_invoice function. Apply the migration in supabase/migrations first."
+            : rpcError.message || "Error creating invoice."
         );
       }
 
-      if (!invoice?.id) {
-        throw new Error(
-          "Invoice record was not created."
-        );
+      const created = rpcRes as {
+        invoice_number?: string;
+      } | null;
+
+      if (!created?.invoice_number) {
+        throw new Error("Invoice was not created.");
       }
-
-      // ── Insert Line Items ───────────────────────────────────────────────
-
-      const formattedItems =
-        validLines.map((l) => ({
-          invoice_id: invoice.id,
-          product_id:
-            l.product_id || null,
-          description: l.description,
-          quantity: l.quantity,
-          unit_price: l.unit_price,
-          tax_rate: l.tax_rate,
-          tax_amount: l.tax_amount,
-          discount_percentage:
-            l.discount_percentage,
-          discount_amount:
-            l.discount_amount,
-          total_amount:
-            l.total_amount,
-        }));
-
-      const { error: itemsErr } =
-        await db
-          .from("invoice_items")
-          .insert(formattedItems);
-
-      if (itemsErr) {
-        throw new Error(
-          "Error creating invoice line items: " +
-            itemsErr.message
-        );
-      }
-
-      // ── Deduct Stock & Create Stock Movement ────────────────────────────
-
-      if (finalStatus !== "draft") {
-        for (const line of validLines) {
-          if (line.product_id) {
-            const {
-              data: rawPData,
-            } = await db
-              .from("products")
-              .select("stock_quantity")
-              .eq("id", line.product_id)
-              .single();
-
-            const pData =
-              rawPData as {
-                stock_quantity: number;
-              } | null;
-
-            const currentStock = Number(
-              pData?.stock_quantity || 0
-            );
-
-            const newStock =
-              currentStock - line.quantity;
-
-            await db
-              .from("products")
-              .update({
-                stock_quantity: newStock,
-              })
-              .eq("id", line.product_id);
-
-            await db
-              .from("stock_movements")
-              .insert([
-                {
-                  product_id:
-                    line.product_id,
-                  movement_type: "sale",
-                  quantity:
-                    -line.quantity,
-                  quantity_before:
-                    currentStock,
-                  quantity_after:
-                    newStock,
-                  reference_id:
-                    invoice.id,
-                  reference_type:
-                    "invoice",
-                  notes: `Sale via Invoice #${invoiceNumber}`,
-                  created_by:
-                    user.id,
-                },
-              ]);
-          }
-        }
-      }
-
-      // ── Save payment information ────────────────────────────────────────
-
-      if (paidAmount > 0) {
-        await db
-          .from("payments")
-          .insert([
-            {
-              invoice_id: invoice.id,
-              payment_date: issueDate,
-              amount: paidAmount,
-              payment_method: "cash",
-              status: "completed",
-              notes: `Initial payment for Invoice #${invoiceNumber}`,
-              created_by: user.id,
-            },
-          ]);
-      }
-
-      // ── Return invoice number & redirect ────────────────────────────────
 
       localStorage.removeItem(DRAFT_KEY);
 
       setSuccessMessage(
-        `Invoice #${invoiceNumber} created successfully!`
+        `Invoice #${created.invoice_number} ${
+          isDraft ? "saved as draft" : "confirmed & created successfully"
+        }!`
       );
 
       setTimeout(() => {
-        router.push(
-          "/dashboard/invoices"
-        );
+        router.push("/dashboard/invoices");
         router.refresh();
       }, 1500);
     } catch (err) {
@@ -922,7 +726,7 @@ export default function NewInvoicePage() {
               New Invoice
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-              #{invoiceNumber}
+              Invoice number is assigned when saved
             </p>
           </div>
 
@@ -1368,7 +1172,7 @@ export default function NewInvoicePage() {
                   </thead>
 
                   <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                    {lines.map((line) => (
+                    {pricedLines.map((line) => (
                       <tr key={line.id}>
                         <td className="py-2 pr-2">
                           <input
@@ -1609,9 +1413,11 @@ export default function NewInvoicePage() {
                     value={globalDiscount}
                     onChange={(e) =>
                       setGlobalDiscount(
-                        parseFloat(
-                          e.target.value
-                        ) || 0
+                        clampNumber(
+                          parseFloat(e.target.value),
+                          0,
+                          100
+                        )
                       )
                     }
                     className="w-20 px-2 py-1 text-sm text-right border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -1803,11 +1609,11 @@ export default function NewInvoicePage() {
       {/* Bill Preview Modal */}
       {showPreview && (
         <BillPreview
-          invoiceNumber={invoiceNumber}
+          invoiceNumber="Assigned on save"
           issueDate={issueDate}
           dueDate={dueDate}
           customer={customer}
-          lines={lines.filter(
+          lines={pricedLines.filter(
             (l) => l.description.trim()
           )}
           subtotal={subtotal}

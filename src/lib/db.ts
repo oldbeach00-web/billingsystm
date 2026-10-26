@@ -95,14 +95,12 @@ export const db = {
       const client = getSupabaseClient();
 
       if (client) {
+        // A configured database must never fall back to the mock user:
+        // without a real session every write would be attributed to a fake id.
         try {
-          const result = await client.auth.getUser();
-
-          if (result.data?.user) {
-            return result;
-          }
+          return await client.auth.getUser();
         } catch {
-          // Fall through to mock
+          return { data: { user: null }, error: null };
         }
       }
 
