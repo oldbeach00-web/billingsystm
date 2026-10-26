@@ -14,7 +14,7 @@ import {
   getLoginRetryAfter,
   recordLoginFailure,
 } from "@/lib/rateLimit";
-import { getServerSupabase } from "@/lib/supabaseServer";
+import { getFreshServerSupabase, getServerSupabase } from "@/lib/supabaseServer";
 
 async function getClientKey(): Promise<string> {
   const h = await headers();
@@ -48,7 +48,9 @@ export async function loginAction(
   // ── Sign into Supabase Auth so database requests are authenticated ───────
   // Row Level Security only allows the dedicated admin account, so when the
   // database is configured a failed Supabase sign-in must fail the login.
-  const supabase = await getServerSupabase();
+  // A fresh client: refreshing a leftover session from an earlier login at
+  // the same time as this sign-in would race for the session cookies
+  const supabase = await getFreshServerSupabase();
 
   if (supabase) {
     const adminEmail = process.env.SUPABASE_ADMIN_EMAIL;
