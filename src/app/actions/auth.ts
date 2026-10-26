@@ -14,7 +14,11 @@ import {
   getLoginRetryAfter,
   recordLoginFailure,
 } from "@/lib/rateLimit";
-import { getFreshServerSupabase, getServerSupabase } from "@/lib/supabaseServer";
+import {
+  getFreshServerSupabase,
+  getServerSupabase,
+  isSupabaseAuthCookie,
+} from "@/lib/supabaseServer";
 
 async function getClientKey(): Promise<string> {
   const h = await headers();
@@ -102,14 +106,20 @@ export async function clearSessions(): Promise<void> {
     maxAge: 0,
   });
 
-  // ── Also sign out of Supabase Auth ────────────────────────────────────────
+  // ── Also sign out of Supabase Auth — this device only ─────────────────────
+  // Every device signs in as the same shared admin account, so the default
+  // (global) sign-out would revoke the database session on all of them.
   try {
     const supabase = await getServerSupabase();
     if (supabase) {
-      await supabase.auth.signOut();
+      await supabase.auth.signOut({ scope: "local" });
     }
   } catch {
-    // Non-fatal — custom cookie is already cleared
+    // Non-fatal — the cookies are cleared below either way
+  }
+
+  for (const cookie of cookieStore.getAll()) {
+    if (isSupabaseAuthCookie(cookie.name)) cookieStore.delete(cookie.name);
   }
 }
 
