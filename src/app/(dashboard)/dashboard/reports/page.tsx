@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { db } from "@/lib/db";
+import { db, fetchAllRows } from "@/lib/db";
 import type { Invoice, InvoiceItem, Product, Customer } from "@/types/database";
 import {
   BarChart3,
@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
+import { localDateString } from "@/lib/billing";
 
 type ReportTab = "products" | "customers" | "stock" | "low_stock";
 
@@ -49,14 +50,21 @@ export default function ReportsPage() {
         { data: prods, error: pErr },
         { data: custs, error: cErr },
       ] = await Promise.all([
-        db
-          .from("invoices")
-          .select("*")
-          .neq("status", "cancelled")
-          .order("issue_date", { ascending: false }),
-        db.from("invoice_items").select("*, product:products(*)"),
-        db.from("products").select("*").order("name"),
-        db.from("customers").select("*").order("name"),
+        // Drafts aren't issued and cancelled invoices are void: neither is a sale.
+        // Every query is paged, since Supabase caps a select at 1000 rows.
+        fetchAllRows<Invoice>(() =>
+          db
+            .from("invoices")
+            .select("*")
+            .not("status", "in", "(draft,cancelled)")
+            .order("issue_date", { ascending: false })
+            .order("id")
+        ),
+        fetchAllRows<InvoiceItemWithProductRow>(() =>
+          db.from("invoice_items").select("*, product:products(*)").order("id")
+        ),
+        fetchAllRows<Product>(() => db.from("products").select("*").order("name").order("id")),
+        fetchAllRows<Customer>(() => db.from("customers").select("*").order("name").order("id")),
       ]);
 
       if (iErr) throw new Error(iErr.message);
@@ -115,29 +123,21 @@ export default function ReportsPage() {
   );
 
   // Date helper thresholds
-  const todayStr = new Date().toISOString().split("T")[0];
+  // All boundaries are local calendar dates (issue_date is a local date);
+  // toISOString() would shift them to the previous day in IST.
   const now = new Date();
+  const todayStr = localDateString(now);
 
-  const sevenDaysAgo = new Date();
+  const sevenDaysAgo = new Date(now);
   sevenDaysAgo.setDate(now.getDate() - 7);
 
-  const sevenDaysAgoStr = sevenDaysAgo.toISOString().split("T")[0];
+  const sevenDaysAgoStr = localDateString(sevenDaysAgo);
 
-  const startOfMonthStr = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    1
-  )
-    .toISOString()
-    .split("T")[0];
+  const startOfMonthStr = localDateString(
+    new Date(now.getFullYear(), now.getMonth(), 1)
+  );
 
-  const startOfYearStr = new Date(
-    now.getFullYear(),
-    0,
-    1
-  )
-    .toISOString()
-    .split("T")[0];
+  const startOfYearStr = localDateString(new Date(now.getFullYear(), 0, 1));
 
   // Calculated Sales Aggregates
   const dailySales = invoices

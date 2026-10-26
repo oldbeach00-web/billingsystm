@@ -88,13 +88,15 @@ export function ProductForm({ initialData }: ProductFormProps) {
       cost_price: parseFloat(formData.cost_price) || 0,
       tax_rate: parseFloat(formData.tax_rate) || 0,
       unit_of_measure: formData.unit_of_measure,
-      stock_quantity: parseFloat(formData.stock_quantity) || 0,
-      min_stock_level: parseFloat(formData.min_stock_level) || 0,
+      min_stock_level: Math.max(0, parseFloat(formData.min_stock_level) || 0),
     };
 
     let apiError;
     if (initialData) {
       const { error: updateError } = await (db.from("products") as { update: (data: unknown) => { eq: (k: string, v: string) => Promise<{error: {message: string} | null}> }, insert: (data: unknown[]) => Promise<{error: {message: string} | null}>, select: (s: string) => { eq: (k: string, v: string) => { single: () => Promise<{data: unknown, error: {message: string} | null}> } } })
+        // Stock is deliberately not part of an edit: writing back the value
+        // loaded with the form would undo sales made since it was opened.
+        // Stock changes go through the Stock page (adjust_stock).
         .update(payload)
         .eq("id", initialData.id);
       apiError = updateError;
@@ -102,6 +104,7 @@ export function ProductForm({ initialData }: ProductFormProps) {
       const { error: insertError } = await (db.from("products") as { update: (data: unknown) => { eq: (k: string, v: string) => Promise<{error: {message: string} | null}> }, insert: (data: unknown[]) => Promise<{error: {message: string} | null}>, select: (s: string) => { eq: (k: string, v: string) => { single: () => Promise<{data: unknown, error: {message: string} | null}> } } })
         .insert([{
           ...payload,
+          stock_quantity: Math.max(0, parseFloat(formData.stock_quantity) || 0),
           sku: await generateNextSku(getProductCode(formData.name)),
         }]);
       apiError = insertError;
@@ -311,12 +314,19 @@ export function ProductForm({ initialData }: ProductFormProps) {
                 <input
                   type="number"
                   step="0.01"
+                  min="0"
                   name="stock_quantity"
                   required
                   value={formData.stock_quantity}
                   onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  disabled={!!initialData}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed"
                 />
+                {initialData && (
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Use the Stock page to adjust stock so every change is logged.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">

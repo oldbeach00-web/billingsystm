@@ -12,6 +12,12 @@ import {
   X,
 } from "lucide-react";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
+import {
+  computePaymentStatus,
+  localDateString,
+  round2,
+  toPaise,
+} from "@/lib/billing";
 
 type PaymentWithInvoice = Payment & {
   invoice?: Invoice & { customer?: Customer };
@@ -53,6 +59,7 @@ export default function PaymentsPage() {
       .from("invoices")
       .select("*, customer:customers(*)")
       .gt("amount_due", 0)
+      .not("status", "in", "(draft,cancelled)")
       .order("created_at", { ascending: false })
       .limit(200);
 
@@ -184,20 +191,13 @@ export default function PaymentsPage() {
     ? Number(selectedInvoice.amount_due)
     : 0;
 
-  const enteredPaidAmount = parseFloat(paidAmountInput) || 0;
-  const isPaidExceedingBalance = enteredPaidAmount > currentBalance;
-  const newTotalPaid = currentPaid + enteredPaidAmount;
-  const newBalanceAmount = Math.max(0, currentTotal - newTotalPaid);
+  const enteredPaidAmount = round2(parseFloat(paidAmountInput) || 0);
+  const isPaidExceedingBalance =
+    toPaise(enteredPaidAmount) > toPaise(currentBalance);
+  const newTotalPaid = round2(currentPaid + enteredPaidAmount);
+  const newBalanceAmount = round2(Math.max(0, currentTotal - newTotalPaid));
 
-  let computedNewStatus: "paid" | "partially_paid" | "due" = "due";
-
-  if (newBalanceAmount === 0 && currentTotal > 0) {
-    computedNewStatus = "paid";
-  } else if (newTotalPaid > 0 && newBalanceAmount > 0) {
-    computedNewStatus = "partially_paid";
-  } else {
-    computedNewStatus = "due";
-  }
+  const computedNewStatus = computePaymentStatus(currentTotal, newTotalPaid);
 
   const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -225,40 +225,24 @@ export default function PaymentsPage() {
     setModalError(null);
 
     try {
-      const {
-        data: { user },
-      } = await db.auth.getUser();
+      // record_payment() locks the invoice row, re-checks the balance and
+      // updates the payment and invoice together, so concurrent payments
+      // can't overwrite each other.
+      const { error: rpcErr } = await db.rpc("record_payment", {
+        p_invoice_id: selectedInvoice.id,
+        p_amount: enteredPaidAmount,
+        p_payment_method: paymentMethod,
+        p_payment_date: localDateString(),
+        p_notes: paymentNotes || null,
+      });
 
-      if (!user) {
-        throw new Error("Not authenticated");
-      }
-
-      const { error: pErr } = await db.from("payments").insert([
-        {
-          invoice_id: selectedInvoice.id,
-          payment_date: new Date().toISOString().split("T")[0],
-          amount: enteredPaidAmount,
-          payment_method: paymentMethod,
-          status: "completed",
-          notes: paymentNotes || null,
-          created_by: user.id,
-        },
-      ]);
-
-      if (pErr) {
-        throw new Error(pErr.message);
-      }
-
-      const { error: iErr } = await db
-        .from("invoices")
-        .update({
-          amount_paid: newTotalPaid,
-          status: computedNewStatus,
-        })
-        .eq("id", selectedInvoice.id);
-
-      if (iErr) {
-        throw new Error(iErr.message);
+      if (rpcErr) {
+        const rpcError = rpcErr as { code?: string; message?: string };
+        throw new Error(
+          rpcError.code === "PGRST202"
+            ? "The database is missing the record_payment function. Apply the migration in supabase/migrations first."
+            : rpcError.message || "Error saving payment."
+        );
       }
 
       setIsModalOpen(false);

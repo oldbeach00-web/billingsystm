@@ -4,6 +4,15 @@ import { useState, useEffect, useRef } from "react";
 import { db } from "@/lib/db";
 import { X, Printer } from "lucide-react";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
+import {
+  amountInWords,
+  determineSupply,
+  isValidGstin,
+  splitTax,
+  stateLabel,
+  taxBreakdown,
+} from "@/lib/gst";
+import { round2 } from "@/lib/billing";
 import type {
   Invoice,
   Customer,
@@ -17,16 +26,20 @@ export interface ShopDetails {
   phone: string;
   email: string;
   gstin: string;
+  logo?: string;
   footer?: string;
   terms?: string;
 }
 
+// Shop identity is never invented: missing details print blank and the
+// preview shows a warning until they're filled in under Settings.
 export const DEFAULT_SHOP_DETAILS: ShopDetails = {
-  name: "BILLING & INVENTORY SYSTEM",
-  address: "123 Commercial Street, Business Hub, City - 400001",
-  phone: "+91 98765 43210",
-  email: "billing@example.com",
-  gstin: "27AAAAA0000A1Z5",
+  name: "",
+  address: "",
+  phone: "",
+  email: "",
+  gstin: "",
+  logo: "",
   footer: "Thank you for your business!",
   terms:
     "1. Goods once sold will not be taken back or exchanged.\n2. Payment is due within agreed payment terms.",
@@ -85,7 +98,8 @@ export function A4InvoicePrint({
           ),
           gstin: String(
             settingsMap.shop_gstin || DEFAULT_SHOP_DETAILS.gstin
-          ),
+          ).trim().toUpperCase(),
+          logo: String(settingsMap.shop_logo || ""),
           footer:
             settingsMap.invoice_footer != null
               ? String(settingsMap.invoice_footer)
@@ -105,6 +119,12 @@ export function A4InvoicePrint({
     if (!printRef.current) return;
 
     const printContents = printRef.current.innerHTML;
+    const appStyles = Array.from(
+      document.querySelectorAll('link[rel="stylesheet"], style')
+    )
+      .map((el) => el.outerHTML)
+      .join("\n");
+    const safeTitle = String(invoice.invoice_number).replace(/[^A-Za-z0-9/_-]/g, "");
 
     const win = window.open(
       "",
@@ -118,7 +138,8 @@ export function A4InvoicePrint({
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Invoice_${invoice.invoice_number}</title>
+          <title>Invoice_${safeTitle}</title>
+          ${appStyles}
           <style>
             @page { size: A4; margin: 15mm; }
             * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -155,10 +176,11 @@ export function A4InvoicePrint({
     win.document.close();
     win.focus();
 
+    // Give the copied stylesheets time to load before printing
     setTimeout(() => {
       win.print();
       win.close();
-    }, 250);
+    }, 600);
   };
 
   const status = invoice.status || "due";
@@ -172,13 +194,45 @@ export function A4InvoicePrint({
       ? "DUE"
       : status.toUpperCase();
 
+  const isCancelled = status === "cancelled";
+  const isDraft = status === "draft";
+
   const paidAmt = Number(invoice.amount_paid || 0);
   const totalAmt = Number(invoice.total_amount || 0);
 
-  const balanceAmt = Number(
-    invoice.amount_due ??
-      Math.max(0, totalAmt - paidAmt)
-  );
+  const balanceAmt = isCancelled
+    ? 0
+    : Number(invoice.amount_due ?? Math.max(0, totalAmt - paidAmt));
+
+  // Place of supply / tax type: use the values stored when the invoice was
+  // created; older invoices fall back to deriving them from the GSTINs.
+  const derivedSupply = determineSupply(shopDetails.gstin, invoice.customer?.gstin);
+  const supplyType = invoice.supply_type ?? derivedSupply.supplyType;
+  const placeOfSupply = invoice.place_of_supply ?? derivedSupply.placeOfSupply;
+
+  const items = invoice.items ?? [];
+  const taxRows = taxBreakdown(items, supplyType);
+  const taxTotal = Number(invoice.tax_amount || 0);
+  // Sum the rate-wise halves so the totals match the GST summary table
+  // exactly (splitting the grand total could differ by a paisa)
+  const taxSplit =
+    taxRows.length > 0
+      ? {
+          cgst: round2(taxRows.reduce((sum, r) => sum + r.cgst, 0)),
+          sgst: round2(taxRows.reduce((sum, r) => sum + r.sgst, 0)),
+        }
+      : splitTax(taxTotal);
+  const taxableTotal =
+    Number(invoice.subtotal || 0) - Number(invoice.discount_amount || 0);
+
+  const shopGstinValid = isValidGstin(shopDetails.gstin);
+  const missingShopDetails = [
+    !shopDetails.name && "shop name",
+    !shopDetails.address && "address",
+    !shopGstinValid && "a valid GSTIN",
+  ].filter(Boolean) as string[];
+
+  const logoUrl = /^https:\/\//i.test(shopDetails.logo ?? "") ? shopDetails.logo : "";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
@@ -223,6 +277,13 @@ export function A4InvoicePrint({
           </div>
         </div>
 
+        {missingShopDetails.length > 0 && (
+          <div className="px-6 py-3 text-sm bg-amber-50 text-amber-800 border-b border-amber-200">
+            This invoice is missing your {missingShopDetails.join(", ")}. Add
+            them in Settings before giving it to a customer.
+          </div>
+        )}
+
         {/* A4 Document Wrapper */}
         <div className="overflow-y-auto flex-1 p-6 bg-gray-100 dark:bg-gray-950 flex justify-center">
           <div
@@ -232,7 +293,17 @@ export function A4InvoicePrint({
           >
             {/* Header: Shop Details & Title */}
             <div className="flex justify-between items-start border-b-2 border-indigo-600 pb-4">
-              <div>
+              <div className="flex gap-3 items-start">
+                {logoUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={logoUrl}
+                    alt=""
+                    className="h-14 w-auto object-contain"
+                    referrerPolicy="no-referrer"
+                  />
+                )}
+                <div>
                 <h1 className="text-2xl font-black text-indigo-600 tracking-wide uppercase">
                   {shopDetails.name}
                 </h1>
@@ -241,20 +312,41 @@ export function A4InvoicePrint({
                   {shopDetails.address}
                 </p>
 
-                <p className="text-xs text-gray-600">
-                  Phone: {shopDetails.phone} | Email:{" "}
-                  {shopDetails.email}
-                </p>
+                {(shopDetails.phone || shopDetails.email) && (
+                  <p className="text-xs text-gray-600">
+                    {[
+                      shopDetails.phone && `Phone: ${shopDetails.phone}`,
+                      shopDetails.email && `Email: ${shopDetails.email}`,
+                    ]
+                      .filter(Boolean)
+                      .join(" | ")}
+                  </p>
+                )}
 
-                <p className="text-xs font-semibold text-gray-800 mt-1">
-                  GSTIN: {shopDetails.gstin}
-                </p>
+                {shopDetails.gstin && (
+                  <p className="text-xs font-semibold text-gray-800 mt-1">
+                    GSTIN: {shopDetails.gstin}
+                  </p>
+                )}
+                </div>
               </div>
 
               <div className="text-right">
                 <h2 className="text-2xl font-bold text-gray-900 tracking-wider">
-                  TAX INVOICE
+                  {isDraft ? "DRAFT" : "TAX INVOICE"}
                 </h2>
+
+                {isDraft && (
+                  <p className="text-[10px] font-bold text-red-600 uppercase">
+                    Not a valid tax invoice
+                  </p>
+                )}
+
+                {isCancelled && (
+                  <p className="text-sm font-black text-red-600 uppercase tracking-widest">
+                    Cancelled
+                  </p>
+                )}
 
                 <p className="text-sm font-semibold text-indigo-600 mt-1">
                   #{invoice.invoice_number}
@@ -273,6 +365,13 @@ export function A4InvoicePrint({
                       Due Date:
                     </span>{" "}
                     {formatDate(invoice.due_date)}
+                  </p>
+
+                  <p>
+                    <span className="font-semibold text-gray-800">
+                      Place of Supply:
+                    </span>{" "}
+                    {stateLabel(placeOfSupply)}
                   </p>
                 </div>
               </div>
@@ -322,8 +421,9 @@ export function A4InvoicePrint({
                           "badge-paid bg-emerald-100 text-emerald-800",
                         status === "partially_paid" &&
                           "badge-partial bg-amber-100 text-amber-800",
-                        (status === "due" || status === "sent") &&
-                          "badge-due bg-red-100 text-red-800"
+                        (status === "due" || status === "sent" || isCancelled) &&
+                          "badge-due bg-red-100 text-red-800",
+                        isDraft && "bg-gray-100 text-gray-700"
                       )}
                     >
                       {statusLabel}
@@ -397,7 +497,7 @@ export function A4InvoicePrint({
                         </td>
 
                         <td className="py-2.5 px-3 text-center text-gray-600">
-                          {item.product?.hsn_sac || "—"}
+                          {item.hsn_sac || item.product?.hsn_sac || "—"}
                         </td>
 
                         <td className="py-2.5 px-3 text-right font-medium">
@@ -452,21 +552,7 @@ export function A4InvoicePrint({
                     </td>
 
                     <td className="text-right font-semibold">
-                      {formatCurrency(
-                        Number(invoice.subtotal || 0)
-                      )}
-                    </td>
-                  </tr>
-
-                  <tr>
-                    <td className="text-gray-600 font-medium">
-                      Total GST:
-                    </td>
-
-                    <td className="text-right font-semibold">
-                      {formatCurrency(
-                        Number(invoice.tax_amount || 0)
-                      )}
+                      {formatCurrency(Number(invoice.subtotal || 0))}
                     </td>
                   </tr>
 
@@ -477,12 +563,43 @@ export function A4InvoicePrint({
                       </td>
 
                       <td className="text-right font-semibold text-red-600">
-                        -{" "}
-                        {formatCurrency(
-                          Number(invoice.discount_amount)
-                        )}
+                        - {formatCurrency(Number(invoice.discount_amount))}
                       </td>
                     </tr>
+                  )}
+
+                  <tr>
+                    <td className="text-gray-600 font-medium">
+                      Taxable Value:
+                    </td>
+
+                    <td className="text-right font-semibold">
+                      {formatCurrency(taxableTotal)}
+                    </td>
+                  </tr>
+
+                  {supplyType === "inter" ? (
+                    <tr>
+                      <td className="text-gray-600 font-medium">IGST:</td>
+                      <td className="text-right font-semibold">
+                        {formatCurrency(taxTotal)}
+                      </td>
+                    </tr>
+                  ) : (
+                    <>
+                      <tr>
+                        <td className="text-gray-600 font-medium">CGST:</td>
+                        <td className="text-right font-semibold">
+                          {formatCurrency(taxSplit.cgst)}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="text-gray-600 font-medium">SGST:</td>
+                        <td className="text-right font-semibold">
+                          {formatCurrency(taxSplit.sgst)}
+                        </td>
+                      </tr>
+                    </>
                   )}
 
                   <tr className="border-t border-gray-300 font-bold bg-white text-sm">
@@ -518,6 +635,64 @@ export function A4InvoicePrint({
               </table>
             </div>
 
+            {/* Amount in words */}
+            <p className="text-xs text-gray-800">
+              <span className="font-semibold">Amount in words: </span>
+              {amountInWords(totalAmt)}
+            </p>
+
+            {/* Rate-wise GST summary */}
+            {taxRows.length > 0 && (
+              <table className="w-full text-[10px] border border-gray-200">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-600">
+                    <th className="py-1 px-2 text-left">GST Rate</th>
+                    <th className="py-1 px-2 text-right">Taxable Value</th>
+                    {supplyType === "inter" ? (
+                      <th className="py-1 px-2 text-right">IGST</th>
+                    ) : (
+                      <>
+                        <th className="py-1 px-2 text-right">CGST</th>
+                        <th className="py-1 px-2 text-right">SGST</th>
+                      </>
+                    )}
+                    <th className="py-1 px-2 text-right">Total Tax</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {taxRows.map((row) => (
+                    <tr key={row.rate} className="border-t border-gray-200">
+                      <td className="py-1 px-2">
+                        {supplyType === "inter"
+                          ? `${row.rate}%`
+                          : `${row.rate / 2}% + ${row.rate / 2}%`}
+                      </td>
+                      <td className="py-1 px-2 text-right">
+                        {formatCurrency(row.taxable)}
+                      </td>
+                      {supplyType === "inter" ? (
+                        <td className="py-1 px-2 text-right">
+                          {formatCurrency(row.igst)}
+                        </td>
+                      ) : (
+                        <>
+                          <td className="py-1 px-2 text-right">
+                            {formatCurrency(row.cgst)}
+                          </td>
+                          <td className="py-1 px-2 text-right">
+                            {formatCurrency(row.sgst)}
+                          </td>
+                        </>
+                      )}
+                      <td className="py-1 px-2 text-right">
+                        {formatCurrency(row.totalTax)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
             {invoice.notes && (
               <div className="border-t border-gray-200 pt-3 text-xs">
                 <p className="font-bold text-gray-500 uppercase text-[10px]">
@@ -552,7 +727,7 @@ export function A4InvoicePrint({
                 <div className="h-12 border-b border-gray-400 mb-1"></div>
 
                 <p className="font-bold text-gray-800">
-                  For {shopDetails.name}
+                  For {shopDetails.name || "the supplier"}
                 </p>
 
                 <p className="text-[9px] text-gray-400">

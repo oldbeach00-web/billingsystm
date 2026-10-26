@@ -13,6 +13,12 @@ import {
   Plus,
 } from "lucide-react";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
+import {
+  computePaymentStatus,
+  localDateString,
+  round2,
+  toPaise,
+} from "@/lib/billing";
 
 type DueInvoice = Invoice & { customer?: Customer };
 
@@ -42,7 +48,7 @@ export default function DueManagementPage() {
           .from("invoices")
           .select("*, customer:customers(*)")
           .gt("amount_due", 0)
-          .neq("status", "cancelled")
+          .not("status", "in", "(draft,cancelled)")
           .order("created_at", { ascending: false })
           .limit(500),
         db.from("customers").select("*").order("name"),
@@ -141,23 +147,17 @@ export default function DueManagementPage() {
     ? Number(selectedInvoice.amount_paid || 0)
     : 0;
 
-  const newPayment = parseFloat(newPaymentInput) || 0;
+  const newPayment = round2(parseFloat(newPaymentInput) || 0);
 
-  const isExceedingBalance = newPayment > oldBalance;
+  const isExceedingBalance = toPaise(newPayment) > toPaise(oldBalance);
 
   const remainingBalance = isExceedingBalance
     ? 0
-    : Math.max(0, oldBalance - newPayment);
+    : round2(Math.max(0, oldBalance - newPayment));
 
-  const updatedTotalPaid = currentPaid + newPayment;
+  const updatedTotalPaid = round2(currentPaid + newPayment);
 
-  let computedStatus: "paid" | "partially_paid" | "due" = "due";
-
-  if (remainingBalance === 0 && currentTotal > 0) {
-    computedStatus = "paid";
-  } else if (updatedTotalPaid > 0 && remainingBalance > 0) {
-    computedStatus = "partially_paid";
-  }
+  const computedStatus = computePaymentStatus(currentTotal, updatedTotalPaid);
 
   const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -183,57 +183,25 @@ export default function DueManagementPage() {
     setSuccessMessage(null);
 
     try {
-      const {
-        data: { user },
-      } = await db.auth.getUser();
+      // record_payment() locks the invoice row, re-checks the balance and
+      // updates the payment and invoice together, so concurrent payments
+      // can't overwrite each other.
+      const { error: rpcErr } = await db.rpc("record_payment", {
+        p_invoice_id: selectedInvoice.id,
+        p_amount: newPayment,
+        p_payment_method: paymentMethod,
+        p_payment_date: localDateString(),
+        p_notes:
+          paymentNotes ||
+          `Due payment for Invoice #${selectedInvoice.invoice_number}`,
+      });
 
-      if (!user) {
-        throw new Error("Authentication error. Please log in again.");
-      }
-
-      const { error: pErr } = await (
-        db.from("payments") as {
-          insert: (
-            data: unknown[]
-          ) => Promise<{ error: { message: string } | null }>;
-        }
-      ).insert([
-        {
-          invoice_id: selectedInvoice.id,
-          payment_date: new Date().toISOString().split("T")[0],
-          amount: newPayment,
-          payment_method: paymentMethod,
-          status: "completed",
-          notes:
-            paymentNotes ||
-            `Due payment for Invoice #${selectedInvoice.invoice_number}`,
-          created_by: user.id,
-        },
-      ]);
-
-      if (pErr) {
-        throw new Error("Error saving payment: " + pErr.message);
-      }
-
-      const { error: iErr } = await (
-        db.from("invoices") as {
-          update: (data: unknown) => {
-            eq: (
-              k: string,
-              v: string
-            ) => Promise<{ error: { message: string } | null }>;
-          };
-        }
-      )
-        .update({
-          amount_paid: updatedTotalPaid,
-          status: computedStatus,
-        })
-        .eq("id", selectedInvoice.id);
-
-      if (iErr) {
+      if (rpcErr) {
+        const rpcError = rpcErr as { code?: string; message?: string };
         throw new Error(
-          "Error updating invoice balance: " + iErr.message
+          rpcError.code === "PGRST202"
+            ? "The database is missing the record_payment function. Apply the migration in supabase/migrations first."
+            : rpcError.message || "Error saving payment."
         );
       }
 

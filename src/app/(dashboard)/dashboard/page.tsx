@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
-import { db } from "@/lib/db";
+import { fetchAllRows } from "@/lib/db";
+import { getServerSupabase } from "@/lib/supabaseServer";
+import { APP_TIME_ZONE, localDateString } from "@/lib/billing";
 import {
   FileText,
   Users,
@@ -19,6 +21,9 @@ import { DatabaseStatusBanner } from "@/components/layout/DatabaseStatusBanner";
 export const metadata: Metadata = {
   title: "Dashboard",
 };
+
+// Live figures: never prerender this page at build time
+export const dynamic = "force-dynamic";
 
 const quickLinks = [
   {
@@ -58,60 +63,75 @@ export default async function DashboardPage() {
   let recentInvoices: RecentInvoice[] | null = null;
   let fetchError: string | null = null;
 
-  try {
-    const results = await Promise.all([
-      db
-        .from("invoices")
-        .select(
-          "id, status, total_amount, amount_due, created_at"
-        ),
-      db
-        .from("customers")
-        .select("id", { count: "exact", head: true }),
-      db
-        .from("products")
-        .select(
-          "id, name, sku, stock_quantity, min_stock_level, unit_of_measure"
-        ),
-      db
-        .from("invoices")
-        .select(
-          "id, invoice_number, total_amount, status, created_at, customer:customers(name)"
-        )
-        .order("created_at", { ascending: false })
-        .limit(5),
-    ]);
+  // Server-side client that carries the signed-in session (RLS needs it).
+  // Reading cookies also makes this page render per request instead of being
+  // prerendered once at build time.
+  const supabase = await getServerSupabase();
 
-    invoices = (results[0].data as Invoice[]) || [];
-    totalCustomers = results[1].count;
-    products = (results[2].data as Product[]) || [];
-    recentInvoices = (results[3].data as RecentInvoice[]) || [];
-  } catch (err: unknown) {
-    fetchError =
-      err instanceof Error
-        ? err.message
-        : "Failed to fetch database data";
+  if (!supabase) {
+    fetchError = "Database connection is not configured.";
+  } else {
+    try {
+      const [invoiceRes, customerRes, productRes, recentRes] = await Promise.all([
+        fetchAllRows<Invoice>(() =>
+          supabase
+            .from("invoices")
+            .select("id, status, total_amount, amount_due, issue_date")
+            .not("status", "in", "(draft,cancelled)")
+            .order("id")
+        ),
+        supabase
+          .from("customers")
+          .select("id", { count: "exact", head: true })
+          .eq("is_active", true),
+        fetchAllRows<Product>(() =>
+          supabase
+            .from("products")
+            .select(
+              "id, name, sku, stock_quantity, min_stock_level, unit_of_measure"
+            )
+            .eq("is_active", true)
+            .order("id")
+        ),
+        supabase
+          .from("invoices")
+          .select(
+            "id, invoice_number, total_amount, status, created_at, customer:customers(name)"
+          )
+          .order("created_at", { ascending: false })
+          .limit(5),
+      ]);
+
+      const firstError =
+        invoiceRes.error ?? customerRes.error ?? productRes.error ?? recentRes.error;
+      if (firstError) throw new Error(firstError.message);
+
+      invoices = invoiceRes.data;
+      totalCustomers = customerRes.count;
+      products = productRes.data;
+      recentInvoices = (recentRes.data as unknown as RecentInvoice[]) || [];
+    } catch (err: unknown) {
+      fetchError =
+        err instanceof Error
+          ? err.message
+          : "Failed to fetch database data";
+    }
   }
 
-  const now = new Date();
-  const startOfToday = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate()
-  );
+  // "Today" in the shop's timezone — the server itself usually runs in UTC
+  const today = localDateString(new Date(), APP_TIME_ZONE);
 
   let totalSales = 0;
   let todaysSales = 0;
   let pendingBalance = 0;
   const totalInvoices = invoices?.length || 0;
 
+  // Drafts and cancelled invoices are already excluded by the query
   invoices?.forEach((inv: Invoice) => {
-    if (inv.status !== "cancelled" && inv.status !== "draft") {
-      totalSales += Number(inv.total_amount);
+    totalSales += Number(inv.total_amount);
 
-      if (new Date(inv.created_at) >= startOfToday) {
-        todaysSales += Number(inv.total_amount);
-      }
+    if (inv.issue_date === today) {
+      todaysSales += Number(inv.total_amount);
     }
 
     pendingBalance += Number(inv.amount_due);

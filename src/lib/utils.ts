@@ -40,17 +40,6 @@ export function formatDate(
 }
 
 /**
- * Generates an invoice number in the format INV-YYYYMM-XXXX.
- */
-export function generateInvoiceNumber(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const random = Math.floor(1000 + Math.random() * 9000);
-  return `INV-${year}${month}-${random}`;
-}
-
-/**
  * Truncates a string to a max length and adds ellipsis.
  */
 export function truncate(str: string, maxLength: number): string {

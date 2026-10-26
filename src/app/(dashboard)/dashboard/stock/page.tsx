@@ -202,16 +202,6 @@ export default function StockPage() {
     setIsSaving(true);
     setError(null);
 
-    const {
-      data: { user },
-    } = await db.auth.getUser();
-
-    if (!user) {
-      setError("Authentication error. Please log in again.");
-      setIsSaving(false);
-      return;
-    }
-
     let quantityChange = 0;
     let movementType: "adjustment" | "damage" = "adjustment";
 
@@ -226,41 +216,23 @@ export default function StockPage() {
       movementType = "damage";
     }
 
-    const currentStock = Number(selectedProduct.stock_quantity);
-    const newStock = currentStock + quantityChange;
+    // adjust_stock() locks the product row and applies the change to the
+    // CURRENT stock (not the value loaded on this page), refuses to go below
+    // zero, and logs the movement in the same transaction.
+    const { error: rpcErr } = await db.rpc("adjust_stock", {
+      p_product_id: selectedProduct.id,
+      p_change: quantityChange,
+      p_movement_type: movementType,
+      p_notes: adjustNotes || null,
+    });
 
-    const { error: updateError } = await db
-      .from("products")
-      .update({ stock_quantity: newStock })
-      .eq("id", selectedProduct.id);
-
-    if (updateError) {
-      setError(updateError.message);
-      setIsSaving(false);
-      return;
-    }
-
-    const { error: movementError } = await db
-      .from("stock_movements")
-      .insert([
-        {
-          product_id: selectedProduct.id,
-          movement_type: movementType,
-          quantity: quantityChange,
-          quantity_before: currentStock,
-          quantity_after: newStock,
-          notes: adjustNotes || null,
-          created_by: user.id,
-        },
-      ]);
-
-    if (movementError) {
-      await db
-        .from("products")
-        .update({ stock_quantity: currentStock })
-        .eq("id", selectedProduct.id);
-
-      setError("Error recording movement: " + movementError.message);
+    if (rpcErr) {
+      const rpcError = rpcErr as { code?: string; message?: string };
+      setError(
+        rpcError.code === "PGRST202"
+          ? "The database is missing the adjust_stock function. Apply the migration in supabase/migrations first."
+          : rpcError.message || "Error adjusting stock."
+      );
     } else {
       setIsModalOpen(false);
       await refreshData();

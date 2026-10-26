@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { db } from "@/lib/db";
+import { isValidGstin } from "@/lib/gst";
 import {
   Store,
   FileText,
@@ -36,11 +37,13 @@ type FetchSettingsResult = {
 };
 
 const defaultFormData: SettingsFormData = {
-  shop_name: "BILLING & INVENTORY SYSTEM",
-  shop_address: "123 Commercial Street, Business Hub, City - 400001",
-  shop_phone: "+91 98765 43210",
-  shop_email: "billing@example.com",
-  shop_gstin: "27AAAAA0000A1Z5",
+  // Shop identity starts blank: placeholder values (e.g. a sample GSTIN)
+  // would otherwise be saved and printed on real invoices.
+  shop_name: "",
+  shop_address: "",
+  shop_phone: "",
+  shop_email: "",
+  shop_gstin: "",
   shop_logo: "",
   invoice_prefix: "INV-",
   invoice_start_num: "1001",
@@ -136,6 +139,20 @@ export default function SettingsPage() {
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // The GSTIN decides CGST+SGST vs IGST on every invoice, so it must be valid
+    const gstin = String(formData.shop_gstin ?? "").trim();
+    if (gstin && !isValidGstin(gstin)) {
+      setError("Please enter a valid 15-character shop GSTIN (e.g. 27ABCDE1234F1Z5).");
+      return;
+    }
+
+    const logo = String(formData.shop_logo ?? "").trim();
+    if (logo && !/^https:\/\//i.test(logo)) {
+      setError("The logo URL must start with https://");
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
     setSuccess(null);

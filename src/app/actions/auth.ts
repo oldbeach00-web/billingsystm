@@ -1,34 +1,25 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { getExpectedPassword, createSessionToken, SESSION_COOKIE_NAME } from "@/lib/auth";
-import { createServerClient } from "@supabase/ssr";
+import {
+  getExpectedPassword,
+  createSessionToken,
+  safeEqual,
+  SESSION_COOKIE_NAME,
+  SESSION_MAX_AGE_SECONDS,
+} from "@/lib/auth";
+import {
+  clearLoginFailures,
+  getLoginRetryAfter,
+  recordLoginFailure,
+} from "@/lib/rateLimit";
+import { getServerSupabase } from "@/lib/supabaseServer";
 
-// ─── Helper: create a server-side Supabase client that reads/writes cookies ──
-async function getServerSupabase() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseKey) return null;
-
-  const cookieStore = await cookies();
-
-  return createServerClient(supabaseUrl, supabaseKey, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
-      setAll(cookiesToSet) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
-          );
-        } catch {
-          // setAll is called in Server Components where cookies are read-only — safe to ignore
-        }
-      },
-    },
-  });
+async function getClientKey(): Promise<string> {
+  const h = await headers();
+  const forwarded = h.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return forwarded || h.get("x-real-ip") || "unknown";
 }
 
 export async function loginAction(
@@ -38,65 +29,66 @@ export async function loginAction(
     return { success: false, error: "Password is required." };
   }
 
+  const clientKey = await getClientKey();
+  const retryAfter = getLoginRetryAfter(clientKey);
+  if (retryAfter > 0) {
+    return {
+      success: false,
+      error: `Too many failed attempts. Try again in ${Math.ceil(retryAfter / 60)} minute(s).`,
+    };
+  }
+
   const expectedPassword = getExpectedPassword();
 
-  if (password.trim() !== expectedPassword.trim()) {
+  if (!(await safeEqual(password, expectedPassword))) {
+    recordLoginFailure(clientKey);
     return { success: false, error: "Incorrect password. Please try again." };
   }
 
-  const cookieStore = await cookies();
-  const sessionToken = createSessionToken(expectedPassword);
+  // ── Sign into Supabase Auth so database requests are authenticated ───────
+  // Row Level Security only allows the dedicated admin account, so when the
+  // database is configured a failed Supabase sign-in must fail the login.
+  const supabase = await getServerSupabase();
 
-  // ── Set custom auth session cookie ────────────────────────────────────────
-  cookieStore.set(SESSION_COOKIE_NAME, sessionToken, {
+  if (supabase) {
+    const adminEmail = process.env.SUPABASE_ADMIN_EMAIL;
+    const adminPassword = process.env.SUPABASE_ADMIN_PASSWORD;
+
+    if (!adminEmail || !adminPassword) {
+      return {
+        success: false,
+        error: "Server misconfigured: SUPABASE_ADMIN_EMAIL / SUPABASE_ADMIN_PASSWORD are not set.",
+      };
+    }
+
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: adminEmail,
+      password: adminPassword,
+    });
+
+    if (signInError) {
+      return {
+        success: false,
+        error: "Database sign-in failed. Check the Supabase admin account credentials.",
+      };
+    }
+  }
+
+  clearLoginFailures(clientKey);
+
+  const cookieStore = await cookies();
+  cookieStore.set(SESSION_COOKIE_NAME, await createSessionToken(), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    maxAge: 60 * 60 * 24 * 30, // 30 days
+    maxAge: SESSION_MAX_AGE_SECONDS,
   });
-
-  // ── Also sign into Supabase Auth for proper RLS + real created_by UUID ────
-  // Uses a dedicated admin account whose credentials are in env vars.
-  // This is non-blocking — login still succeeds even if Supabase Auth fails.
-  const adminEmail = process.env.SUPABASE_ADMIN_EMAIL;
-  const adminPassword = process.env.SUPABASE_ADMIN_PASSWORD;
-
-  if (adminEmail && adminPassword) {
-    try {
-      const supabase = await getServerSupabase();
-      if (supabase) {
-        // Try sign-in first
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: adminEmail,
-          password: adminPassword,
-        });
-
-        if (signInError) {
-          // User might not exist yet — attempt signup (first run only)
-          const { error: signUpError } = await supabase.auth.signUp({
-            email: adminEmail,
-            password: adminPassword,
-          });
-
-          if (!signUpError) {
-            // Try signing in again after signup
-            await supabase.auth.signInWithPassword({
-              email: adminEmail,
-              password: adminPassword,
-            });
-          }
-        }
-      }
-    } catch {
-      // Supabase Auth failure is non-fatal — custom cookie auth still works
-    }
-  }
 
   return { success: true };
 }
 
-export async function logoutAction(): Promise<void> {
+export async function clearSessions(): Promise<void> {
   const cookieStore = await cookies();
 
   // ── Clear custom auth session cookie ─────────────────────────────────────
@@ -117,6 +109,9 @@ export async function logoutAction(): Promise<void> {
   } catch {
     // Non-fatal — custom cookie is already cleared
   }
+}
 
+export async function logoutAction(): Promise<void> {
+  await clearSessions();
   redirect("/login");
 }

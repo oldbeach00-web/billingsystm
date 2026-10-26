@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE_NAME, isValidSessionToken } from "@/lib/auth";
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Static assets and internal next requests pass through
@@ -14,7 +14,7 @@ export function proxy(request: NextRequest) {
   }
 
   const sessionToken = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-  const isAuthenticated = isValidSessionToken(sessionToken);
+  const isAuthenticated = await isValidSessionToken(sessionToken);
 
   const publicRoutes = ["/login"];
   const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
