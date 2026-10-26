@@ -132,33 +132,6 @@ export const db = {
       });
     },
 
-    signUp: (args?: unknown) => {
-      const client = getSupabaseClient();
-
-      if (client) {
-        return client.auth.signUp(args as never);
-      }
-
-      return Promise.resolve({
-        data: {
-          user: {
-            id: "00000000-0000-0000-0000-000000000000",
-          },
-        },
-        error: null,
-      });
-    },
-
-    exchangeCodeForSession: (code: string) => {
-      const client = getSupabaseClient();
-
-      if (client) {
-        return client.auth.exchangeCodeForSession(code);
-      }
-
-      return Promise.resolve({ error: null });
-    },
-
     onAuthStateChange: (callback: unknown) => {
       const client = getSupabaseClient();
 
