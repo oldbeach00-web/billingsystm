@@ -133,6 +133,7 @@ export default function DueManagementPage() {
     setPaymentMethod("cash");
     setPaymentNotes("");
     setModalError(null);
+    setSuccessMessage(null);
   };
 
   const oldBalance = selectedInvoice
@@ -205,17 +206,16 @@ export default function DueManagementPage() {
         );
       }
 
+      // Close the form at once: left open, it still showed the old balance
+      // and could be submitted again, recording the same payment twice
+      setSelectedInvoice(null);
       setSuccessMessage(
         `Payment of ${formatCurrency(
           newPayment
         )} recorded for Invoice #${selectedInvoice.invoice_number}!`
       );
 
-      setTimeout(() => {
-        setSelectedInvoice(null);
-        setSuccessMessage(null);
-        void refreshDueInvoices();
-      }, 1200);
+      await refreshDueInvoices();
     } catch (err) {
       setModalError(
         err instanceof Error ? err.message : "Unknown error"
@@ -278,6 +278,13 @@ export default function DueManagementPage() {
         <div className="p-4 bg-red-50 text-red-700 border border-red-200 rounded-lg flex items-center gap-2">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
           {error}
+        </div>
+      )}
+
+      {successMessage && (
+        <div className="p-4 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg flex items-center gap-2 font-medium">
+          <CheckCircle className="w-5 h-5 flex-shrink-0 text-emerald-600" />
+          {successMessage}
         </div>
       )}
 
@@ -476,13 +483,6 @@ export default function DueManagementPage() {
               <div className="mb-4 p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
                 {modalError}
-              </div>
-            )}
-
-            {successMessage && (
-              <div className="mb-4 p-3 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-sm flex items-center gap-2 font-medium">
-                <CheckCircle className="w-4 h-4 flex-shrink-0 text-emerald-600" />
-                {successMessage}
               </div>
             )}
 
