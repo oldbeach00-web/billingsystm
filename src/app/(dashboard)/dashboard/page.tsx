@@ -72,6 +72,21 @@ export default async function DashboardPage() {
     fetchError = "Database connection is not configured.";
   } else {
     try {
+      // Settle the session once before the parallel queries below; otherwise
+      // each query resolves the access token on its own and one can go out
+      // with a stale token (seen as a single 401 right after login)
+      // getSession avoids a network round trip unless a refresh is due; the
+      // database verifies the token on every query
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        throw new Error(
+          "Your database session has expired. Please log out and log in again."
+        );
+      }
+
       const [invoiceRes, customerRes, productRes, recentRes] = await Promise.all([
         fetchAllRows<Invoice>(() =>
           supabase
