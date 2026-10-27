@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { db } from "@/lib/db";
+import { db, fetchAllRows } from "@/lib/db";
 import type {
   Product,
   StockMovement,
@@ -61,11 +61,13 @@ export default function StockPage() {
 
   const fetchData = useCallback(async (): Promise<FetchDataResult> => {
     if (activeTab === "overview") {
-      const { data, error: fetchError } = await db
-        .from("products")
-        .select("*, category:categories(*)")
-        .order("name")
-        .limit(1000);
+      const { data, error: fetchError } = await fetchAllRows(() =>
+        db
+          .from("products")
+          .select("*, category:categories(*)")
+          .order("name")
+          .order("id")
+      );
 
       if (fetchError) {
         return {

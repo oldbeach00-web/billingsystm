@@ -236,7 +236,8 @@ checks(section, item, status, detail) as (
              case when k.key in ('shop_name', 'shop_address', 'shop_gstin') then 'MISSING' else 'OK' end
            when k.key = 'shop_gstin'
              and (s.value #>> '{}') !~ '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$' then 'PROBLEM'
-           when k.key = 'shop_gstin' and (s.value #>> '{}') = '27AAAAA0000A1Z5' then 'PROBLEM'
+           -- AAAAA0000A is the sample PAN used in example GSTINs (e.g. 22AAAAA0000A1Z5)
+           when k.key = 'shop_gstin' and (s.value #>> '{}') ~ '^[0-9]{2}AAAAA0000A' then 'PROBLEM'
            else 'OK'
          end,
          coalesce(s.value #>> '{}', 'not set')

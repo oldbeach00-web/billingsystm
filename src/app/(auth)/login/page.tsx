@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2, AlertCircle, Lock } from "lucide-react";
-import { loginAction } from "@/app/actions/auth";
 import { cn } from "@/lib/utils";
 
 export default function LoginPage() {
@@ -18,38 +17,25 @@ export default function LoginPage() {
     setError(null);
     setIsLoading(true);
 
+    // A route handler rather than the server action: an action that sets
+    // cookies makes the router refetch the page after navigating, so the
+    // dashboard (and its database queries) rendered twice on every login
     try {
-      // Primary: Next.js Server Action
-      const result = await loginAction(password);
-
-      if (!result.success) {
-        setError(result.error || "Incorrect password. Please try again.");
-        setIsLoading(false);
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
+        router.push("/dashboard");
         return;
       }
-
-      // Successful login -> Redirect to dashboard
-      router.push("/dashboard");
+      setError(data?.error || "Incorrect password. Please try again.");
     } catch {
-      // Fallback: API Route Handler
-      try {
-        const res = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password }),
-        });
-        const data = await res.json();
-        if (res.ok && data.success) {
-          router.push("/dashboard");
-          return;
-        }
-        setError(data?.error || "Incorrect password. Please try again.");
-      } catch {
-        setError("Unable to complete login request. Please check your network connection.");
-      } finally {
-        setIsLoading(false);
-      }
+      setError("Unable to complete login request. Please check your network connection.");
     }
+    setIsLoading(false);
   };
 
   return (
