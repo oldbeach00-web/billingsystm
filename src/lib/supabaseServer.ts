@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import type { Database } from "@/types/database";
 import { getSupabaseEnv } from "@/lib/supabaseEnv";
+import { supabaseFetch } from "@/lib/supabaseFetch";
 
 /** Supabase stores its session in cookies named sb-<project>-auth-token[.N]. */
 export function isSupabaseAuthCookie(name: string): boolean {
@@ -22,6 +23,7 @@ export async function getServerSupabase() {
   const cookieStore = await cookies();
 
   return createServerClient<Database>(env.url, env.key, {
+    global: { fetch: supabaseFetch },
     cookies: {
       getAll() {
         return cookieStore.getAll();
