@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { db } from "@/lib/db";
+import { db, fetchAllRows } from "@/lib/db";
 import type { Invoice, Customer } from "@/types/database";
 import {
   CreditCard,
@@ -44,13 +44,17 @@ export default function DueManagementPage() {
   const fetchDueInvoices = useCallback(async () => {
     const [{ data: invData, error: invErr }, { data: custData }] =
       await Promise.all([
-        db
-          .from("invoices")
-          .select("*, customer:customers(*)")
-          .gt("amount_due", 0)
-          .not("status", "in", "(draft,cancelled)")
-          .order("created_at", { ascending: false })
-          .limit(500),
+        // Every open invoice, page by page: the outstanding total is summed
+        // from this list, so a row cap would under-report it
+        fetchAllRows(() =>
+          db
+            .from("invoices")
+            .select("*, customer:customers(*)")
+            .gt("amount_due", 0)
+            .not("status", "in", "(draft,cancelled)")
+            .order("created_at", { ascending: false })
+            .order("id")
+        ),
         db.from("customers").select("*").order("name"),
       ]);
 

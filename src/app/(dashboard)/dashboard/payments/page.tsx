@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { db } from "@/lib/db";
+import { db, fetchAllRows } from "@/lib/db";
 import type { Payment, Invoice, Customer } from "@/types/database";
 import {
   CreditCard,
@@ -55,13 +55,16 @@ export default function PaymentsPage() {
       .order("created_at", { ascending: false })
       .limit(500);
 
-    const { data: invs, error: iErr } = await db
-      .from("invoices")
-      .select("*, customer:customers(*)")
-      .gt("amount_due", 0)
-      .not("status", "in", "(draft,cancelled)")
-      .order("created_at", { ascending: false })
-      .limit(200);
+    // Every open invoice, so older ones can still be picked for a payment
+    const { data: invs, error: iErr } = await fetchAllRows(() =>
+      db
+        .from("invoices")
+        .select("*, customer:customers(*)")
+        .gt("amount_due", 0)
+        .not("status", "in", "(draft,cancelled)")
+        .order("created_at", { ascending: false })
+        .order("id")
+    );
 
     if (pErr) {
       return {
