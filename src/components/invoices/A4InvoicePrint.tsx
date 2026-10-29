@@ -38,10 +38,24 @@ export const DEFAULT_SHOP_DETAILS: ShopDetails = {
 interface A4InvoicePrintProps {
   invoice: Invoice & {
     customer?: Customer;
-    items?: (InvoiceItem & { product?: Product })[];
+    items?: PrintItem[];
   };
   shopDetails?: ShopDetails;
   onClose: () => void;
+}
+
+// Printed sheets hold at most this many items; the rest continue on the next page
+const ITEMS_PER_PAGE = 20;
+
+type PrintItem = InvoiceItem & { product?: Product };
+
+// Everything taken off the line: its own discount plus its share of any
+// overall bill discount, so Qty × Rate − Discount = Total on every row.
+// Older GST invoices stored tax inside the total, so it's added back first.
+function lineDiscount(item: PrintItem): number {
+  const gross = Number(item.quantity) * Number(item.unit_price);
+  const net = Number(item.total_amount) - Number(item.tax_amount || 0);
+  return Math.max(0, Math.round((gross - net) * 100) / 100);
 }
 
 type SettingRow = {
@@ -128,9 +142,11 @@ export function A4InvoicePrint({
           <title>Invoice_${safeTitle}</title>
           ${appStyles}
           <style>
-            @page { size: A4; margin: 15mm; }
+            @page { size: A4; margin: 12mm; }
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 12px; color: #1f2937; padding: 20px; line-height: 1.4; }
+            body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 12px; color: #1f2937; line-height: 1.4; }
+            .a4-page { min-height: 0 !important; margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; break-after: page; page-break-after: always; }
+            .a4-page:last-child { break-after: auto; page-break-after: auto; }
             .header-table { width: 100%; border-bottom: 2px solid #4f46e5; padding-bottom: 15px; margin-bottom: 20px; }
             .shop-title { font-size: 20px; font-weight: bold; color: #4f46e5; text-transform: uppercase; }
             .inv-title { font-size: 24px; font-weight: bold; color: #111827; text-align: right; letter-spacing: 0.05em; }
@@ -138,8 +154,8 @@ export function A4InvoicePrint({
             .box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; }
             .box-title { font-size: 10px; font-weight: bold; color: #6b7280; text-transform: uppercase; margin-bottom: 6px; }
             table.items { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            table.items th { background: #4f46e5; color: #ffffff; padding: 8px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; text-align: left; }
-            table.items td { padding: 10px; border-bottom: 1px solid #e5e7eb; font-size: 11px; }
+            table.items th { background: #4f46e5; color: #ffffff; padding: 6px 6px; white-space: nowrap; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; text-align: left; }
+            table.items td { padding: 4px 6px; border-bottom: 1px solid #e5e7eb; font-size: 11px; }
             table.items tr:nth-child(even) { background: #f9fafb; }
             .text-right { text-align: right; }
             .text-center { text-align: center; }
@@ -200,6 +216,13 @@ export function A4InvoicePrint({
     !shopDetails.address && "address",
   ].filter(Boolean) as string[];
 
+  const items = invoice.items ?? [];
+  const pages: PrintItem[][] = [];
+  for (let i = 0; i < items.length; i += ITEMS_PER_PAGE) {
+    pages.push(items.slice(i, i + ITEMS_PER_PAGE));
+  }
+  if (pages.length === 0) pages.push([]);
+
   const logoUrl = /^https:\/\//i.test(shopDetails.logo ?? "") ? shopDetails.logo : "";
 
   return (
@@ -252,348 +275,368 @@ export function A4InvoicePrint({
           </div>
         )}
 
-        {/* A4 Document Wrapper */}
+        {/* A4 Document Wrapper: one sheet per ITEMS_PER_PAGE items */}
         <div className="overflow-y-auto flex-1 p-6 bg-gray-100 dark:bg-gray-950 flex justify-center">
-          <div
-            ref={printRef}
-            className="bg-white text-gray-900 w-full max-w-[210mm] p-8 shadow-xl rounded-lg border border-gray-200 space-y-6"
-            style={{ minHeight: "297mm" }}
-          >
-            {/* Header: Shop Details & Title */}
-            <div className="flex justify-between items-start border-b-2 border-indigo-600 pb-4">
-              <div className="flex gap-3 items-start">
-                {logoUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={logoUrl}
-                    alt=""
-                    className="h-14 w-auto object-contain"
-                    referrerPolicy="no-referrer"
-                  />
-                )}
-                <div>
-                <h1 className="text-2xl font-black text-indigo-600 tracking-wide uppercase">
-                  {shopDetails.name}
-                </h1>
+          <div ref={printRef} className="w-full max-w-[210mm] space-y-6">
+            {pages.map((pageItems, pageIdx) => {
+              const isFirstPage = pageIdx === 0;
+              const isLastPage = pageIdx === pages.length - 1;
+              const firstSlNo = pageIdx * ITEMS_PER_PAGE + 1;
 
-                <p className="text-xs text-gray-600 mt-1 max-w-sm">
-                  {shopDetails.address}
-                </p>
-
-                {(shopDetails.phone || shopDetails.email) && (
-                  <p className="text-xs text-gray-600">
-                    {[
-                      shopDetails.phone && `Phone: ${shopDetails.phone}`,
-                      shopDetails.email && `Email: ${shopDetails.email}`,
-                    ]
-                      .filter(Boolean)
-                      .join(" | ")}
-                  </p>
-                )}
-                </div>
-              </div>
-
-              <div className="text-right">
-                <h2 className="text-2xl font-bold text-gray-900 tracking-wider">
-                  {isDraft ? "DRAFT" : "INVOICE"}
-                </h2>
-
-                {isDraft && (
-                  <p className="text-[10px] font-bold text-red-600 uppercase">
-                    Not a valid invoice
-                  </p>
-                )}
-
-                {isCancelled && (
-                  <p className="text-sm font-black text-red-600 uppercase tracking-widest">
-                    Cancelled
-                  </p>
-                )}
-
-                <p className="text-sm font-semibold text-indigo-600 mt-1">
-                  #{invoice.invoice_number}
-                </p>
-
-                <div className="mt-2 text-xs space-y-0.5 text-gray-600">
-                  <p>
-                    <span className="font-semibold text-gray-800">
-                      Date:
-                    </span>{" "}
-                    {formatDate(invoice.issue_date)}
-                  </p>
-
-                  <p>
-                    <span className="font-semibold text-gray-800">
-                      Due Date:
-                    </span>{" "}
-                    {formatDate(invoice.due_date)}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Customer & Bill Details */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs">
-                <p className="font-bold text-gray-500 uppercase tracking-wider text-[10px] mb-1">
-                  Billed To (Customer)
-                </p>
-
-                <p className="font-bold text-sm text-gray-900">
-                  {invoice.customer?.name || "Walk-in Customer"}
-                </p>
-
-                {invoice.customer?.phone && (
-                  <p className="text-gray-600">
-                    Phone: {invoice.customer.phone}
-                  </p>
-                )}
-
-                {invoice.customer?.billing_address && (
-                  <p className="text-gray-600 mt-0.5">
-                    Address: {invoice.customer.billing_address}
-                  </p>
-                )}
-              </div>
-
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs flex flex-col justify-between">
-                <div>
-                  <p className="font-bold text-gray-500 uppercase tracking-wider text-[10px] mb-1">
-                    Invoice Status
-                  </p>
-
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "badge px-3 py-1 rounded-full text-xs font-bold uppercase",
-                        status === "paid" &&
-                          "badge-paid bg-emerald-100 text-emerald-800",
-                        status === "partially_paid" &&
-                          "badge-partial bg-amber-100 text-amber-800",
-                        (status === "due" || status === "sent" || isCancelled) &&
-                          "badge-due bg-red-100 text-red-800",
-                        isDraft && "bg-gray-100 text-gray-700"
+              return (
+                <div
+                  key={pageIdx}
+                  className="a4-page bg-white text-gray-900 p-8 shadow-xl rounded-lg border border-gray-200 space-y-4 flex flex-col"
+                  style={{ minHeight: "297mm" }}
+                >
+                  {/* Header: Shop Details & Title */}
+                  <div className="flex justify-between items-start border-b-2 border-indigo-600 pb-4">
+                    <div className="flex gap-3 items-start">
+                      {logoUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={logoUrl}
+                          alt=""
+                          className="h-14 w-auto object-contain"
+                          referrerPolicy="no-referrer"
+                        />
                       )}
-                    >
-                      {statusLabel}
-                    </span>
+                      <div>
+                      <h1 className="text-2xl font-black text-indigo-600 tracking-wide uppercase">
+                        {shopDetails.name}
+                      </h1>
+
+                      <p className="text-xs text-gray-600 mt-1 max-w-sm">
+                        {shopDetails.address}
+                      </p>
+
+                      {(shopDetails.phone || shopDetails.email) && (
+                        <p className="text-xs text-gray-600">
+                          {[
+                            shopDetails.phone && `Phone: ${shopDetails.phone}`,
+                            shopDetails.email && `Email: ${shopDetails.email}`,
+                          ]
+                            .filter(Boolean)
+                            .join(" | ")}
+                        </p>
+                      )}
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <h2 className="text-2xl font-bold text-gray-900 tracking-wider">
+                        {isDraft ? "DRAFT" : "INVOICE"}
+                      </h2>
+
+                      {isDraft && (
+                        <p className="text-[10px] font-bold text-red-600 uppercase">
+                          Not a valid invoice
+                        </p>
+                      )}
+
+                      {isCancelled && (
+                        <p className="text-sm font-black text-red-600 uppercase tracking-widest">
+                          Cancelled
+                        </p>
+                      )}
+
+                      <p className="text-sm font-semibold text-indigo-600 mt-1">
+                        #{invoice.invoice_number}
+                      </p>
+
+                      <div className="mt-2 text-xs space-y-0.5 text-gray-600">
+                        <p>
+                          <span className="font-semibold text-gray-800">
+                            Date:
+                          </span>{" "}
+                          {formatDate(invoice.issue_date)}
+                        </p>
+
+                        <p>
+                          <span className="font-semibold text-gray-800">
+                            Due Date:
+                          </span>{" "}
+                          {formatDate(invoice.due_date)}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                </div>
 
-                <div className="mt-2 text-right">
-                  <p className="text-[10px] text-gray-500 uppercase font-semibold">
-                    Total Amount
-                  </p>
+                  {/* Customer & Bill Details (first page only) */}
+                  {isFirstPage && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs">
+                      <p className="font-bold text-gray-500 uppercase tracking-wider text-[10px] mb-1">
+                        Billed To (Customer)
+                      </p>
 
-                  <p className="text-lg font-black text-indigo-600">
-                    {formatCurrency(totalAmt)}
-                  </p>
-                </div>
-              </div>
-            </div>
+                      <p className="font-bold text-sm text-gray-900">
+                        {invoice.customer?.name || "Walk-in Customer"}
+                      </p>
 
-            {/* Product Table */}
-            <div className="overflow-hidden border border-gray-200 rounded-lg">
-              <table className="items w-full text-xs">
-                <thead>
-                  <tr className="bg-indigo-600 text-white font-semibold">
-                    <th className="py-2 px-3 text-left w-8">#</th>
-                    <th className="py-2 px-3 text-left">
-                      Item &amp; Description
-                    </th>
-                    <th className="py-2 px-3 text-right w-16">
-                      Qty
-                    </th>
-                    <th className="py-2 px-3 text-right w-24">
-                      Rate
-                    </th>
-                    <th className="py-2 px-3 text-right w-20">
-                      Disc %
-                    </th>
-                    <th className="py-2 px-3 text-right w-28">
-                      Amount
-                    </th>
-                  </tr>
-                </thead>
+                      {invoice.customer?.phone && (
+                        <p className="text-gray-600">
+                          Phone: {invoice.customer.phone}
+                        </p>
+                      )}
 
-                <tbody className="divide-y divide-gray-200">
-                  {invoice.items && invoice.items.length > 0 ? (
-                    invoice.items.map((item, idx) => (
-                      <tr
-                        key={item.id || idx}
-                        className="hover:bg-gray-50"
-                      >
-                        <td className="py-2.5 px-3 text-gray-500 text-center">
-                          {idx + 1}
-                        </td>
+                      {invoice.customer?.billing_address && (
+                        <p className="text-gray-600 mt-0.5">
+                          Address: {invoice.customer.billing_address}
+                        </p>
+                      )}
+                    </div>
 
-                        <td className="py-2.5 px-3">
-                          <p className="font-semibold text-gray-900">
-                            {item.description}
-                          </p>
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs flex flex-col justify-between">
+                      <div>
+                        <p className="font-bold text-gray-500 uppercase tracking-wider text-[10px] mb-1">
+                          Invoice Status
+                        </p>
 
-                          {item.product?.sku && (
-                            <p className="text-[10px] text-gray-500">
-                              SKU: {item.product.sku}
-                            </p>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              "badge px-3 py-1 rounded-full text-xs font-bold uppercase",
+                              status === "paid" &&
+                                "badge-paid bg-emerald-100 text-emerald-800",
+                              status === "partially_paid" &&
+                                "badge-partial bg-amber-100 text-amber-800",
+                              (status === "due" || status === "sent" || isCancelled) &&
+                                "badge-due bg-red-100 text-red-800",
+                              isDraft && "bg-gray-100 text-gray-700"
+                            )}
+                          >
+                            {statusLabel}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 text-right">
+                        <p className="text-[10px] text-gray-500 uppercase font-semibold">
+                          Total Amount
+                        </p>
+
+                        <p className="text-lg font-black text-indigo-600">
+                          {formatCurrency(totalAmt)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  )}
+
+                  {/* Product Table */}
+                  <div className="overflow-hidden border border-gray-200 rounded-lg">
+                    <table className="items w-full text-xs">
+                      <thead>
+                        <tr className="bg-indigo-600 text-white font-semibold">
+                          <th className="py-2 px-2 text-center w-14 whitespace-nowrap">SL. No.</th>
+                          <th className="py-2 px-2 text-left">Item</th>
+                          <th className="py-2 px-2 text-right w-14">Qty</th>
+                          <th className="py-2 px-2 text-left w-14">Unit</th>
+                          <th className="py-2 px-2 text-right w-24">Rate</th>
+                          <th className="py-2 px-2 text-right w-24">Discount</th>
+                          <th className="py-2 px-2 text-right w-28">Total</th>
+                        </tr>
+                      </thead>
+
+                      <tbody className="divide-y divide-gray-200">
+                        {pageItems.length > 0 ? (
+                          pageItems.map((item, idx) => {
+                            const discount = lineDiscount(item);
+
+                            return (
+                              <tr key={item.id || idx}>
+                                <td className="py-1.5 px-2 text-gray-500 text-center">
+                                  {firstSlNo + idx}
+                                </td>
+
+                                <td className="py-1.5 px-2">
+                                  <span className="font-semibold text-gray-900">
+                                    {item.description}
+                                  </span>
+
+                                  {item.product?.sku && (
+                                    <span className="text-[10px] text-gray-500">
+                                      {" "}· SKU: {item.product.sku}
+                                    </span>
+                                  )}
+                                </td>
+
+                                <td className="py-1.5 px-2 text-right font-medium">
+                                  {Number(item.quantity)}
+                                </td>
+
+                                <td className="py-1.5 px-2 text-gray-700">
+                                  {item.product?.unit_of_measure || "—"}
+                                </td>
+
+                                <td className="py-1.5 px-2 text-right text-gray-700">
+                                  {formatCurrency(Number(item.unit_price))}
+                                </td>
+
+                                <td className="py-1.5 px-2 text-right text-gray-700">
+                                  {discount > 0 ? formatCurrency(discount) : "—"}
+                                </td>
+
+                                <td className="py-1.5 px-2 text-right font-bold text-gray-900">
+                                  {formatCurrency(Number(item.total_amount))}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td
+                              colSpan={7}
+                              className="py-4 text-center text-gray-400"
+                            >
+                              No line items found.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {!isLastPage && (
+                    <p className="text-xs text-right italic text-gray-500">
+                      Continued on next page…
+                    </p>
+                  )}
+
+                  {isLastPage && (
+                    <>
+                    {/* Totals Summary */}
+                    <div className="flex justify-end pt-2">
+                      <table className="totals-table text-xs border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
+                        <tbody>
+                          <tr>
+                            <td className="text-gray-600 font-medium">
+                              Subtotal:
+                            </td>
+
+                            <td className="text-right font-semibold">
+                              {formatCurrency(Number(invoice.subtotal || 0))}
+                            </td>
+                          </tr>
+
+                          {Number(invoice.discount_amount || 0) > 0 && (
+                            <tr>
+                              <td className="text-red-600 font-medium">
+                                Discount:
+                              </td>
+
+                              <td className="text-right font-semibold text-red-600">
+                                - {formatCurrency(Number(invoice.discount_amount))}
+                              </td>
+                            </tr>
                           )}
-                        </td>
 
-                        <td className="py-2.5 px-3 text-right font-medium">
-                          {item.quantity}{" "}
-                          {item.product?.unit_of_measure || ""}
-                        </td>
+                          {legacyTax > 0 && (
+                            <tr>
+                              <td className="text-gray-600 font-medium">
+                                Tax (as billed):
+                              </td>
 
-                        <td className="py-2.5 px-3 text-right text-gray-700">
-                          {formatCurrency(Number(item.unit_price))}
-                        </td>
-
-                        <td className="py-2.5 px-3 text-right text-gray-700">
-                          {item.discount_percentage > 0
-                            ? `${item.discount_percentage}%`
-                            : "—"}
-                        </td>
-
-                        <td className="py-2.5 px-3 text-right font-bold text-gray-900">
-                          {formatCurrency(
-                            Number(item.total_amount)
+                              <td className="text-right font-semibold">
+                                {formatCurrency(legacyTax)}
+                              </td>
+                            </tr>
                           )}
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td
-                        colSpan={6}
-                        className="py-4 text-center text-gray-400"
-                      >
-                        No line items found.
-                      </td>
-                    </tr>
+
+                          <tr className="border-t border-gray-300 font-bold bg-white text-sm">
+                            <td className="text-gray-900 py-2">
+                              Grand Total:
+                            </td>
+
+                            <td className="text-right text-indigo-600 py-2">
+                              {formatCurrency(totalAmt)}
+                            </td>
+                          </tr>
+
+                          <tr className="text-emerald-700">
+                            <td className="font-semibold">
+                              Paid Amount:
+                            </td>
+
+                            <td className="text-right font-bold">
+                              {formatCurrency(paidAmt)}
+                            </td>
+                          </tr>
+
+                          <tr className="text-amber-800 bg-amber-50 font-bold border-t border-amber-200">
+                            <td className="py-1.5">
+                              Balance Amount:
+                            </td>
+
+                            <td className="text-right py-1.5">
+                              {formatCurrency(balanceAmt)}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Amount in words */}
+                    <p className="text-xs text-gray-800">
+                      <span className="font-semibold">Amount in words: </span>
+                      {amountInWords(totalAmt)}
+                    </p>
+
+                    {invoice.notes && (
+                      <div className="border-t border-gray-200 pt-3 text-xs">
+                        <p className="font-bold text-gray-500 uppercase text-[10px]">
+                          Notes / Instructions
+                        </p>
+
+                        <p className="text-gray-700 mt-0.5">
+                          {invoice.notes}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Footer Signatory & Terms */}
+                    <div className="pt-3 border-t border-gray-200 flex justify-between items-end text-[10px] text-gray-500">
+                      <div>
+                        <p className="font-bold text-gray-700 mb-1">
+                          Terms &amp; Conditions:
+                        </p>
+
+                        <p className="whitespace-pre-line">
+                          {shopDetails.terms ||
+                            DEFAULT_SHOP_DETAILS.terms}
+                        </p>
+
+                        <p className="mt-2 text-indigo-600 font-semibold">
+                          {shopDetails.footer ||
+                            DEFAULT_SHOP_DETAILS.footer}
+                        </p>
+                      </div>
+
+                      <div className="text-center w-48">
+                        <div className="h-10 border-b border-gray-400 mb-1"></div>
+
+                        <p className="font-bold text-gray-800">
+                          For {shopDetails.name || "the supplier"}
+                        </p>
+
+                        <p className="text-[9px] text-gray-400">
+                          (Authorised Signatory)
+                        </p>
+                      </div>
+                    </div>
+                    </>
                   )}
-                </tbody>
-              </table>
-            </div>
 
-            {/* Totals Summary */}
-            <div className="flex justify-end pt-2">
-              <table className="totals-table text-xs border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
-                <tbody>
-                  <tr>
-                    <td className="text-gray-600 font-medium">
-                      Subtotal:
-                    </td>
-
-                    <td className="text-right font-semibold">
-                      {formatCurrency(Number(invoice.subtotal || 0))}
-                    </td>
-                  </tr>
-
-                  {Number(invoice.discount_amount || 0) > 0 && (
-                    <tr>
-                      <td className="text-red-600 font-medium">
-                        Discount:
-                      </td>
-
-                      <td className="text-right font-semibold text-red-600">
-                        - {formatCurrency(Number(invoice.discount_amount))}
-                      </td>
-                    </tr>
+                  {pages.length > 1 && (
+                    <p className="mt-auto pt-2 text-[10px] text-center text-gray-400">
+                      Page {pageIdx + 1} of {pages.length}
+                    </p>
                   )}
-
-                  {legacyTax > 0 && (
-                    <tr>
-                      <td className="text-gray-600 font-medium">
-                        Tax (as billed):
-                      </td>
-
-                      <td className="text-right font-semibold">
-                        {formatCurrency(legacyTax)}
-                      </td>
-                    </tr>
-                  )}
-
-                  <tr className="border-t border-gray-300 font-bold bg-white text-sm">
-                    <td className="text-gray-900 py-2">
-                      Grand Total:
-                    </td>
-
-                    <td className="text-right text-indigo-600 py-2">
-                      {formatCurrency(totalAmt)}
-                    </td>
-                  </tr>
-
-                  <tr className="text-emerald-700">
-                    <td className="font-semibold">
-                      Paid Amount:
-                    </td>
-
-                    <td className="text-right font-bold">
-                      {formatCurrency(paidAmt)}
-                    </td>
-                  </tr>
-
-                  <tr className="text-amber-800 bg-amber-50 font-bold border-t border-amber-200">
-                    <td className="py-1.5">
-                      Balance Amount:
-                    </td>
-
-                    <td className="text-right py-1.5">
-                      {formatCurrency(balanceAmt)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            {/* Amount in words */}
-            <p className="text-xs text-gray-800">
-              <span className="font-semibold">Amount in words: </span>
-              {amountInWords(totalAmt)}
-            </p>
-
-            {invoice.notes && (
-              <div className="border-t border-gray-200 pt-3 text-xs">
-                <p className="font-bold text-gray-500 uppercase text-[10px]">
-                  Notes / Instructions
-                </p>
-
-                <p className="text-gray-700 mt-0.5">
-                  {invoice.notes}
-                </p>
-              </div>
-            )}
-
-            {/* Footer Signatory & Terms */}
-            <div className="pt-6 border-t border-gray-200 flex justify-between items-end text-[10px] text-gray-500">
-              <div>
-                <p className="font-bold text-gray-700 mb-1">
-                  Terms &amp; Conditions:
-                </p>
-
-                <p className="whitespace-pre-line">
-                  {shopDetails.terms ||
-                    DEFAULT_SHOP_DETAILS.terms}
-                </p>
-
-                <p className="mt-2 text-indigo-600 font-semibold">
-                  {shopDetails.footer ||
-                    DEFAULT_SHOP_DETAILS.footer}
-                </p>
-              </div>
-
-              <div className="text-center w-48">
-                <div className="h-12 border-b border-gray-400 mb-1"></div>
-
-                <p className="font-bold text-gray-800">
-                  For {shopDetails.name || "the supplier"}
-                </p>
-
-                <p className="text-[9px] text-gray-400">
-                  (Authorised Signatory)
-                </p>
-              </div>
-            </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
