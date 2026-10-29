@@ -1,7 +1,8 @@
 "use client";
 
 import {  useState, useEffect , useCallback } from "react";
-import { db } from '@/lib/db';
+import Link from "next/link";
+import { db, fetchAllRows } from '@/lib/db';
 import type { Customer, Invoice } from "@/types/database";
 import {
   Users,
@@ -14,9 +15,20 @@ import {
   X,
   CheckCircle,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Store,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+import { WALK_IN_NAME, findWalkInCustomerIds } from "@/lib/walkIn";
+
+interface WalkInSummary {
+  bills: number;
+  total: number;
+  paid: number;
+  due: number;
+}
+
+type WalkInInvoiceRow = Pick<Invoice, "total_amount" | "amount_paid" | "amount_due">;
 
 interface CustomerWithTotals extends Customer {
   customer_type: "retail" | "regular";
@@ -47,6 +59,42 @@ export default function CustomersPage() {
   }, [search]);
 
   // Modal States
+  const [walkIn, setWalkIn] = useState<WalkInSummary | null>(null);
+
+  // Totals for the shared walk-in customer record, shown in its own section
+  const fetchWalkInSummary = useCallback(async () => {
+    try {
+      const ids = await findWalkInCustomerIds();
+      if (ids.length === 0) {
+        setWalkIn({ bills: 0, total: 0, paid: 0, due: 0 });
+        return;
+      }
+
+      const { data, error: invErr } = await fetchAllRows<WalkInInvoiceRow>(() =>
+        db.from("invoices")
+          .select("total_amount, amount_paid, amount_due")
+          .in("customer_id", ids)
+          .not("status", "in", "(draft,cancelled)")
+          .order("id")
+      );
+      if (invErr) throw new Error(invErr.message);
+
+      setWalkIn({
+        bills: data.length,
+        total: data.reduce((sum, inv) => sum + Number(inv.total_amount || 0), 0),
+        paid: data.reduce((sum, inv) => sum + Number(inv.amount_paid || 0), 0),
+        due: data.reduce((sum, inv) => sum + Number(inv.amount_due || 0), 0),
+      });
+    } catch {
+      // The customer list still works without the walk-in totals
+      setWalkIn(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    setTimeout(() => fetchWalkInSummary(), 0);
+  }, [fetchWalkInSummary]);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [formData, setFormData] = useState({
@@ -68,7 +116,9 @@ export default function CustomersPage() {
       let query = db
         .from("customers")
         .select("*", { count: "exact" })
-        .eq("is_active", true);
+        .eq("is_active", true)
+        // The shared walk-in record has its own section above the table
+        .not("name", "ilike", WALK_IN_NAME);
 
       // Strip characters with meaning in PostgREST filter syntax
       const term = debouncedSearch.replace(/[,()*%\\:"]/g, " ").trim();
@@ -246,6 +296,52 @@ export default function CustomersPage() {
         <div className="p-4 bg-red-50 text-red-700 border border-red-200 rounded-lg flex items-center gap-2">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
           {error}
+        </div>
+      )}
+
+      {/* Walk-in Customers */}
+      {walkIn && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-emerald-200 dark:border-emerald-800 p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/30">
+                <Store className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 dark:text-white">Walk-in Customers</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Counter sales billed without customer details
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Link
+                href="/dashboard/invoices?customers=walk_in"
+                className="px-3 py-2 text-sm font-medium text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+              >
+                View walk-in bills
+              </Link>
+              <Link
+                href="/dashboard/invoices/new"
+                className="px-3 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700"
+              >
+                New bill
+              </Link>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: "Bills", value: String(walkIn.bills), className: "text-gray-900 dark:text-white" },
+              { label: "Total Sales", value: formatCurrency(walkIn.total), className: "text-gray-900 dark:text-white" },
+              { label: "Paid", value: formatCurrency(walkIn.paid), className: "text-emerald-600 dark:text-emerald-400" },
+              { label: "Due", value: formatCurrency(walkIn.due), className: "text-amber-600 dark:text-amber-400" },
+            ].map((stat) => (
+              <div key={stat.label} className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900/40">
+                <p className="text-xs text-gray-500 dark:text-gray-400">{stat.label}</p>
+                <p className={`text-lg font-bold ${stat.className}`}>{stat.value}</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

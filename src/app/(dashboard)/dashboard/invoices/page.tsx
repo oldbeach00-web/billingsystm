@@ -19,6 +19,9 @@ import Link from "next/link";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
 import { A4InvoicePrint } from "@/components/invoices/A4InvoicePrint";
 import { DatabaseStatusBanner } from "@/components/layout/DatabaseStatusBanner";
+import { WALK_IN_NAME, findWalkInCustomerIds } from "@/lib/walkIn";
+
+type CustomerKindFilter = "all" | "walk_in" | "named";
 
 type InvoiceWithDetails = Invoice & {
   customer?: Customer;
@@ -54,6 +57,7 @@ export default function InvoicesPage() {
   const [customerFilter, setCustomerFilter] = useState("");
   const [debouncedCustomerFilter, setDebouncedCustomerFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [kindFilter, setKindFilter] = useState<CustomerKindFilter>("all");
   const [startDateFilter, setStartDateFilter] = useState("");
   const [endDateFilter, setEndDateFilter] = useState("");
 
@@ -66,6 +70,14 @@ export default function InvoicesPage() {
 
     return () => clearTimeout(timer);
   }, [search, customerFilter]);
+
+  // The Customers page links here with ?customers=walk_in
+  useEffect(() => {
+    const kind = new URLSearchParams(window.location.search).get("customers");
+    if (kind === "walk_in" || kind === "named") {
+      setTimeout(() => setKindFilter(kind), 0);
+    }
+  }, []);
 
   const [cancellingId, setCancellingId] = useState<string | null>(null);
 
@@ -89,6 +101,23 @@ export default function InvoicesPage() {
 
       if (statusFilter !== "all") {
         query = query.eq("status", statusFilter);
+      }
+
+      if (kindFilter !== "all") {
+        const walkInIds = await findWalkInCustomerIds();
+        const idList = walkInIds.join(",");
+
+        if (kindFilter === "walk_in") {
+          // Bills with no customer at all also count as walk-in
+          query = walkInIds.length
+            ? query.or(`customer_id.is.null,customer_id.in.(${idList})`)
+            : query.is("customer_id", null);
+        } else {
+          query = query.not("customer_id", "is", null);
+          if (walkInIds.length) {
+            query = query.not("customer_id", "in", `(${idList})`);
+          }
+        }
       }
 
       if (startDateFilter) {
@@ -185,6 +214,7 @@ export default function InvoicesPage() {
     page,
     debouncedSearch,
     statusFilter,
+    kindFilter,
     startDateFilter,
     endDateFilter,
     debouncedCustomerFilter,
@@ -294,6 +324,7 @@ export default function InvoicesPage() {
     setSearch("");
     setCustomerFilter("");
     setStatusFilter("all");
+    setKindFilter("all");
     setStartDateFilter("");
     setEndDateFilter("");
     setPage(1);
@@ -303,6 +334,7 @@ export default function InvoicesPage() {
     search ||
     customerFilter ||
     statusFilter !== "all" ||
+    kindFilter !== "all" ||
     startDateFilter ||
     endDateFilter;
 
@@ -332,6 +364,32 @@ export default function InvoicesPage() {
       <DatabaseStatusBanner error={error} />
 
       <div className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 space-y-3">
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              ["all", "All bills"],
+              ["walk_in", "Walk-in"],
+              ["named", "Named customers"],
+            ] as [CustomerKindFilter, string][]
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => {
+                setKindFilter(value);
+                setPage(1);
+              }}
+              className={cn(
+                "px-3 py-1.5 text-sm font-medium rounded-full border transition-colors",
+                kindFilter === value
+                  ? "bg-indigo-600 border-indigo-600 text-white"
+                  : "border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div className="relative sm:col-span-2">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -500,7 +558,7 @@ export default function InvoicesPage() {
                       </td>
 
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
-                        {inv.customer?.name || "Walk-in Customer"}
+                        {inv.customer?.name || WALK_IN_NAME}
                       </td>
 
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
