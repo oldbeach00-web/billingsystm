@@ -233,15 +233,11 @@ checks(section, item, status, detail) as (
   select 'Settings', 'setting ' || k.key,
          case
            when s.key is null or coalesce(s.value #>> '{}', '') = '' then
-             case when k.key in ('shop_name', 'shop_address', 'shop_gstin') then 'MISSING' else 'OK' end
-           when k.key = 'shop_gstin'
-             and (s.value #>> '{}') !~ '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$' then 'PROBLEM'
-           -- AAAAA0000A is the sample PAN used in example GSTINs (e.g. 22AAAAA0000A1Z5)
-           when k.key = 'shop_gstin' and (s.value #>> '{}') ~ '^[0-9]{2}AAAAA0000A' then 'PROBLEM'
+             case when k.key in ('shop_name', 'shop_address') then 'MISSING' else 'OK' end
            else 'OK'
          end,
          coalesce(s.value #>> '{}', 'not set')
-  from (values ('shop_name'),('shop_address'),('shop_gstin'),('invoice_prefix'),
+  from (values ('shop_name'),('shop_address'),('invoice_prefix'),
                ('invoice_start_num'),('shop_logo')) k(key)
   left join public.settings s on s.key = k.key
 

@@ -12,7 +12,6 @@ interface BillPreviewProps {
   customer: BillCustomer;
   lines: BillLineItem[];
   subtotal: number;
-  totalTax: number;
   globalDiscountAmt: number;
   grandTotal: number;
   paidAmount: number;
@@ -31,7 +30,6 @@ export function BillPreview({
   customer,
   lines,
   subtotal,
-  totalTax,
   globalDiscountAmt,
   grandTotal,
   paidAmount,
@@ -138,7 +136,6 @@ export function BillPreview({
               <p className="font-semibold text-gray-900 dark:text-white">{customer.name}</p>
               {customer.phone && <p className="text-gray-600 dark:text-gray-400">{customer.phone}</p>}
               {customer.billing_address && <p className="text-gray-600 dark:text-gray-400">{customer.billing_address}</p>}
-              {customer.gstin && <p className="text-gray-600 dark:text-gray-400">GSTIN: {customer.gstin}</p>}
             </div>
 
             {/* Line items */}
@@ -151,7 +148,6 @@ export function BillPreview({
                     <th className="px-3 py-3 text-right">Qty</th>
                     <th className="px-3 py-3 text-right">Unit Price</th>
                     <th className="px-3 py-3 text-right">Disc</th>
-                    <th className="px-3 py-3 text-right">GST</th>
                     <th className="px-3 py-3 text-right">Amount</th>
                   </tr>
                 </thead>
@@ -164,7 +160,6 @@ export function BillPreview({
                         {line.product?.sku && (
                           <p className="text-xs text-gray-500 dark:text-gray-400">
                             SKU: {line.product.sku}
-                            {line.product.hsn_sac ? ` • HSN: ${line.product.hsn_sac}` : ""}
                           </p>
                         )}
                       </td>
@@ -176,9 +171,6 @@ export function BillPreview({
                       </td>
                       <td className="px-3 py-3 text-right text-sm text-gray-700 dark:text-gray-300">
                         {line.discount_percentage > 0 ? `${line.discount_percentage}%` : "—"}
-                      </td>
-                      <td className="px-3 py-3 text-right text-sm text-gray-700 dark:text-gray-300">
-                        {line.tax_rate > 0 ? `${line.tax_rate}%` : "—"}
                       </td>
                       <td className="px-3 py-3 text-right text-sm font-semibold text-gray-900 dark:text-white">
                         {formatCurrency(line.total_amount)}
@@ -195,10 +187,6 @@ export function BillPreview({
                 <div className="flex justify-between text-gray-600 dark:text-gray-400">
                   <span>Subtotal</span>
                   <span>{formatCurrency(subtotal)}</span>
-                </div>
-                <div className="flex justify-between text-gray-600 dark:text-gray-400">
-                  <span>Total GST</span>
-                  <span>{formatCurrency(totalTax)}</span>
                 </div>
                 {globalDiscountAmt > 0 && (
                   <div className="flex justify-between text-red-600 dark:text-red-400">

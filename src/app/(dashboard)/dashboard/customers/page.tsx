@@ -17,7 +17,6 @@ import {
   ChevronRight
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
-import { isValidGstin } from "@/lib/gst";
 
 interface CustomerWithTotals extends Customer {
   customer_type: "retail" | "regular";
@@ -54,7 +53,6 @@ export default function CustomersPage() {
     name: "",
     phone: "",
     billing_address: "",
-    gstin: "",
     email: "",
     notes: "",
   });
@@ -76,7 +74,7 @@ export default function CustomersPage() {
       const term = debouncedSearch.replace(/[,()*%\\:"]/g, " ").trim();
 
       if (term) {
-        query = query.or(`name.ilike.%${term}%,phone.ilike.%${term}%,gstin.ilike.%${term}%,billing_address.ilike.%${term}%`);
+        query = query.or(`name.ilike.%${term}%,phone.ilike.%${term}%,billing_address.ilike.%${term}%`);
       }
 
       query = query.order("name").range((page - 1) * pageSize, page * pageSize - 1);
@@ -137,7 +135,6 @@ export default function CustomersPage() {
         name: customer.name || "",
         phone: customer.phone || "",
         billing_address: customer.billing_address || "",
-        gstin: customer.gstin || "",
         email: customer.email || "",
         notes: customer.notes || "",
       });
@@ -147,7 +144,6 @@ export default function CustomersPage() {
         name: "",
         phone: "",
         billing_address: "",
-        gstin: "",
         email: "",
         notes: "",
       });
@@ -174,11 +170,6 @@ export default function CustomersPage() {
       }
     }
 
-    if (formData.gstin.trim() && !isValidGstin(formData.gstin)) {
-      setModalError("Please enter a valid 15-character GSTIN (e.g. 27ABCDE1234F1Z5).");
-      return;
-    }
-
     setIsSaving(true);
     setModalError(null);
 
@@ -186,7 +177,6 @@ export default function CustomersPage() {
       name: formData.name.trim(),
       phone: formData.phone.trim() || null,
       billing_address: formData.billing_address.trim() || null,
-      gstin: formData.gstin.trim().toUpperCase() || null,
       email: formData.email.trim() || null,
       notes: formData.notes.trim() || null,
       country: "India",
@@ -264,7 +254,7 @@ export default function CustomersPage() {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
         <input
           type="text"
-          placeholder="Search by Customer Name, Phone, GSTIN, or Address..."
+          placeholder="Search by Customer Name, Phone, or Address..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -302,7 +292,6 @@ export default function CustomersPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Customer Name</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Customer Type</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Phone</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Address</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">GSTIN</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Purchases</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Paid</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Balance</th>
@@ -323,9 +312,6 @@ export default function CustomersPage() {
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 max-w-xs truncate">
                       {c.billing_address || "_"}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                      {c.gstin || "_"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-gray-900 dark:text-white">
                       {formatCurrency(c.total_purchases)}
@@ -435,18 +421,6 @@ export default function CustomersPage() {
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     placeholder="e.g. +91 98765 43210"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    GSTIN (optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.gstin}
-                    onChange={(e) => setFormData({ ...formData, gstin: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="15-digit GSTIN"
                   />
                 </div>
               </div>

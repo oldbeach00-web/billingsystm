@@ -2,7 +2,7 @@
  * Billing math shared by the invoice, payment and report screens.
  *
  * Must stay in sync with public.create_invoice() in
- * supabase/migrations/20261026000000_security_and_atomic_billing.sql,
+ * supabase/migrations/20261029000000_remove_gst.sql,
  * which recomputes these amounts on the server and is authoritative.
  */
 
@@ -27,7 +27,6 @@ export interface LineInput {
   quantity: number;
   unit_price: number;
   discount_percentage: number;
-  tax_rate: number;
 }
 
 export interface LineAmounts {
@@ -37,16 +36,11 @@ export interface LineAmounts {
   discount_amount: number;
   /** this line's share of the overall (invoice-level) discount */
   overall_discount_share: number;
-  /** value GST is charged on: gross − line discount − overall discount share */
-  taxable_amount: number;
-  tax_amount: number;
+  /** gross − line discount − overall discount share (no tax is charged) */
   total_amount: number;
 }
 
-/**
- * Computes one line. The overall discount is applied to the taxable value
- * BEFORE GST, so GST is charged only on the discounted price.
- */
+/** Computes one line: line discount first, then its share of the overall discount. */
 export function computeLineAmounts(
   line: LineInput,
   overallDiscountPct = 0
@@ -55,16 +49,12 @@ export function computeLineAmounts(
   const discount_amount = round2(gross_amount * (line.discount_percentage / 100));
   const net = round2(gross_amount - discount_amount);
   const overall_discount_share = round2(net * (overallDiscountPct / 100));
-  const taxable_amount = round2(net - overall_discount_share);
-  const tax_amount = round2(taxable_amount * (line.tax_rate / 100));
-  const total_amount = round2(taxable_amount + tax_amount);
+  const total_amount = round2(net - overall_discount_share);
 
   return {
     gross_amount,
     discount_amount,
     overall_discount_share,
-    taxable_amount,
-    tax_amount,
     total_amount,
   };
 }
@@ -74,8 +64,6 @@ export interface InvoiceTotals {
   subtotal: number;
   /** total overall discount */
   discount_amount: number;
-  taxable_amount: number;
-  tax_amount: number;
   total_amount: number;
 }
 
@@ -86,8 +74,6 @@ export function computeInvoiceTotals(lines: LineAmounts[]): InvoiceTotals {
   return {
     subtotal: sum((l) => l.gross_amount - l.discount_amount),
     discount_amount: sum((l) => l.overall_discount_share),
-    taxable_amount: sum((l) => l.taxable_amount),
-    tax_amount: sum((l) => l.tax_amount),
     total_amount: sum((l) => l.total_amount),
   };
 }
@@ -126,4 +112,49 @@ export function localDateString(date: Date = new Date(), timeZone?: string): str
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
+}
+
+const ONES = [
+  "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
+  "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen",
+  "Seventeen", "Eighteen", "Nineteen",
+];
+const TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+
+function belowHundred(n: number): string {
+  if (n < 20) return ONES[n];
+  return `${TENS[Math.floor(n / 10)]}${n % 10 ? ` ${ONES[n % 10]}` : ""}`;
+}
+
+function belowThousand(n: number): string {
+  const hundreds = Math.floor(n / 100);
+  const rest = n % 100;
+  return [hundreds ? `${ONES[hundreds]} Hundred` : "", rest ? belowHundred(rest) : ""]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** Whole number in Indian numbering words (crore / lakh / thousand). */
+function integerToWords(n: number): string {
+  if (n === 0) return "Zero";
+  const parts: string[] = [];
+  const crore = Math.floor(n / 10000000);
+  const lakh = Math.floor((n % 10000000) / 100000);
+  const thousand = Math.floor((n % 100000) / 1000);
+  const rest = n % 1000;
+  if (crore) parts.push(`${integerToWords(crore)} Crore`);
+  if (lakh) parts.push(`${belowHundred(lakh)} Lakh`);
+  if (thousand) parts.push(`${belowHundred(thousand)} Thousand`);
+  if (rest) parts.push(belowThousand(rest));
+  return parts.join(" ");
+}
+
+/** e.g. 1062.5 → "Rupees One Thousand Sixty Two and Fifty Paise Only" */
+export function amountInWords(amount: number): string {
+  const paiseTotal = Math.round(round2(Math.abs(amount)) * 100);
+  const rupees = Math.floor(paiseTotal / 100);
+  const paise = paiseTotal % 100;
+  return `Rupees ${integerToWords(rupees)}${
+    paise ? ` and ${belowHundred(paise)} Paise` : ""
+  } Only`;
 }

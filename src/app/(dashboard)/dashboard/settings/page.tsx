@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { db } from "@/lib/db";
-import { isValidGstin } from "@/lib/gst";
 import {
   Store,
   FileText,
@@ -14,7 +13,6 @@ import {
   Mail,
   Phone,
   MapPin,
-  Hash,
   Image as ImageIcon,
 } from "lucide-react";
 
@@ -23,7 +21,6 @@ type SettingsFormData = {
   shop_address: string;
   shop_phone: string;
   shop_email: string;
-  shop_gstin: string;
   shop_logo: string;
   invoice_prefix: string;
   invoice_start_num: string;
@@ -37,13 +34,12 @@ type FetchSettingsResult = {
 };
 
 const defaultFormData: SettingsFormData = {
-  // Shop identity starts blank: placeholder values (e.g. a sample GSTIN)
+  // Shop identity starts blank: placeholder values (e.g. a sample address)
   // would otherwise be saved and printed on real invoices.
   shop_name: "",
   shop_address: "",
   shop_phone: "",
   shop_email: "",
-  shop_gstin: "",
   shop_logo: "",
   invoice_prefix: "INV-",
   invoice_start_num: "1001",
@@ -93,7 +89,6 @@ export default function SettingsPage() {
           shop_address: settingsMap.shop_address,
           shop_phone: settingsMap.shop_phone,
           shop_email: settingsMap.shop_email,
-          shop_gstin: settingsMap.shop_gstin,
           shop_logo: settingsMap.shop_logo,
           invoice_prefix: settingsMap.invoice_prefix,
           invoice_start_num: settingsMap.invoice_start_num,
@@ -139,13 +134,6 @@ export default function SettingsPage() {
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    // The GSTIN decides CGST+SGST vs IGST on every invoice, so it must be valid
-    const gstin = String(formData.shop_gstin ?? "").trim();
-    if (gstin && !isValidGstin(gstin)) {
-      setError("Please enter a valid 15-character shop GSTIN (e.g. 27ABCDE1234F1Z5).");
-      return;
-    }
 
     const logo = String(formData.shop_logo ?? "").trim();
     if (logo && !/^https:\/\//i.test(logo)) {
@@ -338,29 +326,6 @@ export default function SettingsPage() {
                   }
                   className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="contact@shop.com"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Shop GSTIN
-              </label>
-
-              <div className="relative">
-                <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-
-                <input
-                  type="text"
-                  value={formData.shop_gstin}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      shop_gstin: e.target.value,
-                    })
-                  }
-                  className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="15-digit GSTIN"
                 />
               </div>
             </div>

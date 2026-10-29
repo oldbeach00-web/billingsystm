@@ -26,7 +26,6 @@ import {
   toPaise,
 } from "@/lib/billing";
 import { BillPreview } from "@/components/invoices/BillPreview";
-import { isValidGstin } from "@/lib/gst";
 
 // ─── Draft Persistence ────────────────────────────────────────────────────────
 const DRAFT_KEY = "new_invoice_draft_v1";
@@ -40,10 +39,8 @@ export interface BillLineItem {
   description: string;
   quantity: number;
   unit_price: number;
-  tax_rate: number;
   discount_percentage: number;
   discount_amount: number;
-  tax_amount: number;
   total_amount: number;
 }
 
@@ -52,7 +49,6 @@ export interface BillCustomer {
   name: string;
   phone: string;
   billing_address: string;
-  gstin: string;
 }
 
 interface CustomerInsertData {
@@ -62,8 +58,8 @@ interface CustomerInsertData {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // Keeps every numeric input inside its valid range (no negative quantities,
-// prices or tax; percentages within 0–100).
-function sanitizeLine<T extends BillLineItem | Omit<BillLineItem, "discount_amount" | "tax_amount" | "total_amount">>(
+// or prices; percentages within 0–100).
+function sanitizeLine<T extends BillLineItem | Omit<BillLineItem, "discount_amount" | "total_amount">>(
   line: T
 ): T {
   return {
@@ -71,14 +67,13 @@ function sanitizeLine<T extends BillLineItem | Omit<BillLineItem, "discount_amou
     quantity: clampNumber(Number(line.quantity), 0),
     unit_price: clampNumber(Number(line.unit_price), 0),
     discount_percentage: clampNumber(Number(line.discount_percentage), 0, 100),
-    tax_rate: clampNumber(Number(line.tax_rate), 0, 100),
   };
 }
 
 // Line amounts before the overall discount (the overall discount is applied
-// in pricedLines below, before GST).
+// in pricedLines below).
 function computeLine(
-  line: Omit<BillLineItem, "discount_amount" | "tax_amount" | "total_amount">
+  line: Omit<BillLineItem, "discount_amount" | "total_amount">
 ): BillLineItem {
   const clean = sanitizeLine(line);
   const amounts = computeLineAmounts(clean);
@@ -86,7 +81,6 @@ function computeLine(
   return {
     ...clean,
     discount_amount: amounts.discount_amount,
-    tax_amount: amounts.tax_amount,
     total_amount: amounts.total_amount,
   };
 }
@@ -99,10 +93,8 @@ function newLineItem(product?: Product): BillLineItem {
     description: product?.name ?? "",
     quantity: 1,
     unit_price: product?.unit_price ?? 0,
-    tax_rate: product?.tax_rate ?? 0,
     discount_percentage: 0,
     discount_amount: 0,
-    tax_amount: 0,
     total_amount: 0,
   };
 
@@ -146,7 +138,6 @@ export default function NewInvoicePage() {
     name: "",
     phone: "",
     billing_address: "",
-    gstin: "",
   });
   const [customerSearch, setCustomerSearch] = useState("");
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
@@ -298,7 +289,6 @@ export default function NewInvoicePage() {
       name: "",
       phone: "",
       billing_address: "",
-      gstin: "",
     });
 
     setCustomerSearch("");
@@ -344,14 +334,12 @@ export default function NewInvoicePage() {
 
   // ─── Computed totals & Stage 6 Payment Logic ─────────────────────────────
 
-  // The overall discount is spread across lines and applied BEFORE GST, so
-  // GST is charged only on the discounted value. Amounts are rounded to paise
+  // The overall discount is spread across lines. Amounts are rounded to paise
   // per line; the server recomputes them identically in create_invoice().
   const pricedLines: BillLineItem[] = lines.map((l) => {
     const amounts = computeLineAmounts(l, globalDiscount);
     return {
       ...l,
-      tax_amount: amounts.tax_amount,
       total_amount: amounts.total_amount,
     };
   });
@@ -363,7 +351,6 @@ export default function NewInvoicePage() {
   );
 
   const subtotal = totals.subtotal;
-  const totalTax = totals.tax_amount;
   const globalDiscountAmt = totals.discount_amount;
   const grandTotal = totals.total_amount;
 
@@ -393,7 +380,6 @@ export default function NewInvoicePage() {
       name: c.name,
       phone: c.phone || "",
       billing_address: c.billing_address || "",
-      gstin: c.gstin || "",
     });
 
     setCustomerSearch(c.name);
@@ -407,7 +393,6 @@ export default function NewInvoicePage() {
       name: "",
       phone: "",
       billing_address: "",
-      gstin: "",
     });
 
     setCustomerSearch("");
@@ -495,11 +480,6 @@ export default function NewInvoicePage() {
   ) => {
     if (isSaving) return;
 
-    if (!customer.id && customer.gstin.trim() && !isValidGstin(customer.gstin)) {
-      setError("Please enter a valid 15-character customer GSTIN, or leave it blank.");
-      return;
-    }
-
     if (!customer.name.trim()) {
       setError(
         "Please add a customer before confirming."
@@ -522,13 +502,12 @@ export default function NewInvoicePage() {
       (l) =>
         !(Number(l.quantity) > 0) ||
         !(Number(l.unit_price) >= 0) ||
-        !(l.discount_percentage >= 0 && l.discount_percentage <= 100) ||
-        !(l.tax_rate >= 0 && l.tax_rate <= 100)
+        !(l.discount_percentage >= 0 && l.discount_percentage <= 100)
     );
 
     if (hasInvalidLine) {
       setError(
-        "Quantity must be greater than 0, prices cannot be negative, and discount / GST must be between 0 and 100%."
+        "Quantity must be greater than 0, prices cannot be negative, and discount must be between 0 and 100%."
       );
       return;
     }
@@ -599,7 +578,6 @@ export default function NewInvoicePage() {
               phone: customer.phone || null,
               billing_address:
                 customer.billing_address || null,
-              gstin: customer.gstin.trim().toUpperCase() || null,
               country: "India",
             },
           ])
@@ -647,7 +625,6 @@ export default function NewInvoicePage() {
         description: l.description.trim(),
         quantity: l.quantity,
         unit_price: l.unit_price,
-        tax_rate: l.tax_rate,
         discount_percentage: l.discount_percentage,
       }));
 
@@ -926,24 +903,6 @@ export default function NewInvoicePage() {
                       />
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                        GSTIN (optional)
-                      </label>
-
-                      <input
-                        value={customer.gstin}
-                        onChange={(e) =>
-                          setCustomer((c) => ({
-                            ...c,
-                            gstin: e.target.value,
-                          }))
-                        }
-                        className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        placeholder="15-digit GSTIN"
-                        readOnly={!!customer.id}
-                      />
-                    </div>
                   </div>
                 </div>
               ) : (
@@ -994,10 +953,7 @@ export default function NewInvoicePage() {
 
                               <p className="text-xs text-gray-500 dark:text-gray-400">
                                 {c.phone ||
-                                  "No phone"}{" "}
-                                {c.gstin
-                                  ? `• GSTIN: ${c.gstin}`
-                                  : ""}
+                                  "No phone"}
                               </p>
                             </button>
                           )
@@ -1122,14 +1078,6 @@ export default function NewInvoicePage() {
                                       p.unit_price
                                     )}
                                   </p>
-
-                                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                                    +
-                                    {
-                                      p.tax_rate
-                                    }
-                                    % GST
-                                  </p>
                                 </div>
                               </div>
                             </button>
@@ -1160,9 +1108,6 @@ export default function NewInvoicePage() {
                       </th>
                       <th className="pb-2 text-right w-20">
                         Disc%
-                      </th>
-                      <th className="pb-2 text-right w-20">
-                        GST%
                       </th>
                       <th className="pb-2 text-right w-28">
                         Total
@@ -1246,26 +1191,6 @@ export default function NewInvoicePage() {
                               updateLine(
                                 line.id,
                                 "discount_percentage",
-                                parseFloat(
-                                  e.target.value
-                                ) || 0
-                              )
-                            }
-                            className="w-full px-2 py-1.5 text-sm text-right border border-gray-200 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                          />
-                        </td>
-
-                        <td className="py-2 px-1">
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            step="0.01"
-                            value={line.tax_rate}
-                            onChange={(e) =>
-                              updateLine(
-                                line.id,
-                                "tax_rate",
                                 parseFloat(
                                   e.target.value
                                 ) || 0
@@ -1384,18 +1309,6 @@ export default function NewInvoicePage() {
                   <span className="text-gray-900 dark:text-white font-medium">
                     {formatCurrency(
                       subtotal
-                    )}
-                  </span>
-                </div>
-
-                <div className="flex justify-between">
-                  <span className="text-gray-500 dark:text-gray-400">
-                    Total GST
-                  </span>
-
-                  <span className="text-gray-900 dark:text-white font-medium">
-                    {formatCurrency(
-                      totalTax
                     )}
                   </span>
                 </div>
@@ -1617,7 +1530,6 @@ export default function NewInvoicePage() {
             (l) => l.description.trim()
           )}
           subtotal={subtotal}
-          totalTax={totalTax}
           globalDiscountAmt={
             globalDiscountAmt
           }
