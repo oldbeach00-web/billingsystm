@@ -14,6 +14,7 @@ import {
   Eye,
   UserPlus,
   CheckCircle,
+  Store,
 } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
 import {
@@ -26,6 +27,11 @@ import {
   toPaise,
 } from "@/lib/billing";
 import { BillPreview } from "@/components/invoices/BillPreview";
+import {
+  WALK_IN_NAME,
+  getOrCreateWalkInCustomerId,
+  isWalkInCustomer,
+} from "@/lib/walkIn";
 
 // ─── Draft Persistence ────────────────────────────────────────────────────────
 const DRAFT_KEY = "new_invoice_draft_v1";
@@ -49,6 +55,8 @@ export interface BillCustomer {
   name: string;
   phone: string;
   billing_address: string;
+  /** Bill goes to the shared walk-in customer record (no details taken) */
+  is_walk_in?: boolean;
 }
 
 interface CustomerInsertData {
@@ -368,10 +376,11 @@ export default function NewInvoicePage() {
 
   const filteredCustomers = customers.filter(
     (c) =>
-      c.name
+      !isWalkInCustomer(c) &&
+      (c.name
         .toLowerCase()
         .includes(customerSearch.toLowerCase()) ||
-      (c.phone || "").includes(customerSearch)
+        (c.phone || "").includes(customerSearch))
   );
 
   const selectExistingCustomer = (c: Customer) => {
@@ -383,6 +392,20 @@ export default function NewInvoicePage() {
     });
 
     setCustomerSearch(c.name);
+    setShowCustomerDropdown(false);
+    setShowNewCustomerForm(false);
+  };
+
+  const selectWalkInCustomer = () => {
+    setCustomer({
+      id: null,
+      name: WALK_IN_NAME,
+      phone: "",
+      billing_address: "",
+      is_walk_in: true,
+    });
+
+    setCustomerSearch("");
     setShowCustomerDropdown(false);
     setShowNewCustomerForm(false);
   };
@@ -566,7 +589,12 @@ export default function NewInvoicePage() {
 
       let customerId = customer.id;
 
-      if (!customerId && customer.name.trim()) {
+      if (
+        !customerId &&
+        (customer.is_walk_in || isWalkInCustomer(customer))
+      ) {
+        customerId = await getOrCreateWalkInCustomerId();
+      } else if (!customerId && customer.name.trim()) {
         const {
           data: rawNewCust,
           error: custErr,
@@ -824,13 +852,35 @@ export default function NewInvoicePage() {
                 Customer
               </h3>
 
-              {customer.id ||
+              {customer.is_walk_in ? (
+                <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
+                  <div className="flex items-center gap-2">
+                    <Store className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">
+                        {WALK_IN_NAME}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Counter sale, no customer details needed
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={clearCustomer}
+                    className="text-gray-400 hover:text-red-500"
+                    title="Change customer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : customer.id ||
               showNewCustomerForm ? (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium text-gray-900 dark:text-white">
                       {showNewCustomerForm
-                        ? "New Walk-in Customer"
+                        ? "New Customer"
                         : customer.name}
                     </span>
 
@@ -910,7 +960,8 @@ export default function NewInvoicePage() {
                   ref={customerRef}
                   className="relative"
                 >
-                  <div className="relative">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
 
                     <input
@@ -930,6 +981,15 @@ export default function NewInvoicePage() {
                       className="w-full pl-9 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       placeholder="Search existing customer by name or phone..."
                     />
+                  </div>
+
+                  <button
+                    onClick={selectWalkInCustomer}
+                    className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/40 whitespace-nowrap"
+                  >
+                    <Store className="w-4 h-4" />
+                    Walk-in Customer
+                  </button>
                   </div>
 
                   {showCustomerDropdown && (
@@ -982,10 +1042,9 @@ export default function NewInvoicePage() {
                         >
                           <UserPlus className="w-4 h-4" />
 
-                          Add &quot;
-                          {customerSearch ||
-                            "Walk-in"}
-                          &quot; as new customer
+                          {customerSearch
+                            ? <>Add &quot;{customerSearch}&quot; as new customer</>
+                            : "Add new customer"}
                         </button>
                       </div>
                     </div>
