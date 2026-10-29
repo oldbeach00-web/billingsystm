@@ -77,10 +77,12 @@ export interface Product {
   sku: string;
   name: string;
   description: string | null;
+  /** Legacy GST field: no longer shown or edited, kept for old data */
   hsn_sac: string | null;
   category_id: string | null;
   unit_price: number;
   cost_price: number;
+  /** Legacy GST rate: ignored when billing; new products store 0 */
   tax_rate: number;
   unit_of_measure: string;
   stock_quantity: number;
@@ -98,6 +100,7 @@ export interface Customer {
   name: string;
   email: string | null;
   phone: string | null;
+  /** Legacy GST field: no longer shown or edited, kept for old data */
   gstin: string | null;
   billing_address: string | null;
   shipping_address: string | null;
@@ -122,6 +125,7 @@ export interface Invoice {
   issue_date: string;
   due_date: string;
   subtotal: number;
+  /** GST charged on invoices issued before GST was removed; 0 on new ones */
   tax_amount: number;
   discount_amount: number;
   total_amount: number;
@@ -129,9 +133,9 @@ export interface Invoice {
   amount_due: number;
   notes: string | null;
   terms: string | null;
-  /** GST state code of the place of supply (set by create_invoice) */
+  /** Legacy GST place of supply; only set on older invoices */
   place_of_supply?: string | null;
-  /** 'intra' = CGST + SGST, 'inter' = IGST (set by create_invoice) */
+  /** Legacy GST supply type; only set on older invoices */
   supply_type?: "intra" | "inter" | null;
   created_by: string;
   created_at: string;
@@ -145,11 +149,12 @@ export interface InvoiceItem {
   id: string;
   invoice_id: string;
   product_id: string | null;
-  /** HSN/SAC snapshot taken when the invoice was created */
+  /** Legacy HSN/SAC snapshot; only set on older invoices */
   hsn_sac?: string | null;
   description: string;
   quantity: number;
   unit_price: number;
+  /** Legacy GST on older invoices; 0 on new ones */
   tax_rate: number;
   tax_amount: number;
   discount_percentage: number;

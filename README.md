@@ -1,20 +1,20 @@
 # Billing & Inventory Management System
 
-A production-grade, full-stack GST Billing & Inventory Management System built with **Next.js 16 (Turbopack)**, **TypeScript**, and **Tailwind CSS v4**.
+A production-grade, full-stack Billing & Inventory Management System built with **Next.js 16 (Turbopack)**, **TypeScript**, and **Tailwind CSS v4**.
 
 ---
 
 ## 🚀 Key Features
 
 - **Dashboard**: Real-time business metrics (Total Sales, Total Paid, Total Balance, Invoices, Low-Stock Alerts).
-- **Product & Category Management**: Full CRUD operations with SKU, HSN/SAC codes, Purchase & Selling prices, GST rates, and stock thresholds.
+- **Product & Category Management**: Full CRUD operations with SKU, Purchase & Selling prices, and stock thresholds.
 - **Inventory Management**: Real-time stock tracking, manual adjustments (additions/reductions), movement audit logs, and low-stock warnings.
-- **POS / New Bill Screen**: Product search, customer inline creation, line item discounts, auto-calculated GST & subtotal, and pre-confirmation bill preview.
+- **POS / New Bill Screen**: Product search, customer inline creation, line item discounts, auto-calculated subtotal & totals, and pre-confirmation bill preview.
 - **Payment Processing**: Staff manual paid amount entry, automatic balance calculation (`Total - Paid`), and status handling (`PAID`, `PARTIALLY PAID`, `DUE`).
-- **Invoice History & A4 Printable Layout**: Printable GST Tax Invoice template formatted to standard A4 dimensions (210mm x 297mm) with reprinting support.
+- **Invoice History & A4 Printable Layout**: Printable invoice template formatted to standard A4 dimensions (210mm x 297mm) with reprinting support.
 - **Customer & Due Management**: Track customer purchase history and manage outstanding invoice balances with payment history logs.
 - **Reports & Analytics**: Daily, Weekly, Monthly, Yearly sales totals, Product sales reports, Customer analytics, Stock reports, and Date Range filters.
-- **Shop Settings**: Dynamic store configuration (Name, Address, Phone, Email, GSTIN, Logo, Terms & Conditions) automatically integrated into printable invoices.
+- **Shop Settings**: Dynamic store configuration (Name, Address, Phone, Email, Logo, Terms & Conditions) automatically integrated into printable invoices.
 
 ---
 
@@ -52,11 +52,11 @@ NEXT_PUBLIC_APP_TIMEZONE=Asia/Kolkata
    (Row Level Security) and adds the atomic `create_invoice`, `record_payment`
    and `adjust_stock` functions the app requires.
 3. Run `supabase/migrations/20261026000100_gst_details_and_cancellation.sql`.
-   It stores the HSN code and place of supply (CGST + SGST vs IGST) on each new
-   invoice and adds `cancel_invoice`, which voids an invoice and returns its stock.
-4. In Settings, enter your shop name, address and a valid GSTIN — the GSTIN's
-   state code decides whether invoices charge CGST + SGST or IGST.
-5. Authentication → Providers → Email: turn **off** "Allow new users to sign up".
+   It adds `cancel_invoice`, which voids an invoice and returns its stock.
+4. Run `supabase/migrations/20261029000000_remove_gst.sql`. Invoices no longer
+   charge GST; invoices issued before this keep their stored tax and totals.
+5. In Settings, enter your shop name and address.
+6. Authentication → Providers → Email: turn **off** "Allow new users to sign up".
 
 ---
 

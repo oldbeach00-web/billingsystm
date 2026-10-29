@@ -4,15 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { db } from "@/lib/db";
 import { X, Printer } from "lucide-react";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
-import {
-  amountInWords,
-  determineSupply,
-  isValidGstin,
-  splitTax,
-  stateLabel,
-  taxBreakdown,
-} from "@/lib/gst";
-import { round2 } from "@/lib/billing";
+import { amountInWords } from "@/lib/billing";
 import type {
   Invoice,
   Customer,
@@ -25,7 +17,6 @@ export interface ShopDetails {
   address: string;
   phone: string;
   email: string;
-  gstin: string;
   logo?: string;
   footer?: string;
   terms?: string;
@@ -38,7 +29,6 @@ export const DEFAULT_SHOP_DETAILS: ShopDetails = {
   address: "",
   phone: "",
   email: "",
-  gstin: "",
   logo: "",
   footer: "Thank you for your business!",
   terms:
@@ -96,9 +86,6 @@ export function A4InvoicePrint({
           email: String(
             settingsMap.shop_email || DEFAULT_SHOP_DETAILS.email
           ),
-          gstin: String(
-            settingsMap.shop_gstin || DEFAULT_SHOP_DETAILS.gstin
-          ).trim().toUpperCase(),
           logo: String(settingsMap.shop_logo || ""),
           footer:
             settingsMap.invoice_footer != null
@@ -204,32 +191,13 @@ export function A4InvoicePrint({
     ? 0
     : Number(invoice.amount_due ?? Math.max(0, totalAmt - paidAmt));
 
-  // Place of supply / tax type: use the values stored when the invoice was
-  // created; older invoices fall back to deriving them from the GSTINs.
-  const derivedSupply = determineSupply(shopDetails.gstin, invoice.customer?.gstin);
-  const supplyType = invoice.supply_type ?? derivedSupply.supplyType;
-  const placeOfSupply = invoice.place_of_supply ?? derivedSupply.placeOfSupply;
+  // Invoices are no longer taxed. Invoices issued while GST was charged keep
+  // their stored tax so their totals still add up exactly as billed.
+  const legacyTax = Number(invoice.tax_amount || 0);
 
-  const items = invoice.items ?? [];
-  const taxRows = taxBreakdown(items, supplyType);
-  const taxTotal = Number(invoice.tax_amount || 0);
-  // Sum the rate-wise halves so the totals match the GST summary table
-  // exactly (splitting the grand total could differ by a paisa)
-  const taxSplit =
-    taxRows.length > 0
-      ? {
-          cgst: round2(taxRows.reduce((sum, r) => sum + r.cgst, 0)),
-          sgst: round2(taxRows.reduce((sum, r) => sum + r.sgst, 0)),
-        }
-      : splitTax(taxTotal);
-  const taxableTotal =
-    Number(invoice.subtotal || 0) - Number(invoice.discount_amount || 0);
-
-  const shopGstinValid = isValidGstin(shopDetails.gstin);
   const missingShopDetails = [
     !shopDetails.name && "shop name",
     !shopDetails.address && "address",
-    !shopGstinValid && "a valid GSTIN",
   ].filter(Boolean) as string[];
 
   const logoUrl = /^https:\/\//i.test(shopDetails.logo ?? "") ? shopDetails.logo : "";
@@ -322,23 +290,17 @@ export function A4InvoicePrint({
                       .join(" | ")}
                   </p>
                 )}
-
-                {shopDetails.gstin && (
-                  <p className="text-xs font-semibold text-gray-800 mt-1">
-                    GSTIN: {shopDetails.gstin}
-                  </p>
-                )}
                 </div>
               </div>
 
               <div className="text-right">
                 <h2 className="text-2xl font-bold text-gray-900 tracking-wider">
-                  {isDraft ? "DRAFT" : "TAX INVOICE"}
+                  {isDraft ? "DRAFT" : "INVOICE"}
                 </h2>
 
                 {isDraft && (
                   <p className="text-[10px] font-bold text-red-600 uppercase">
-                    Not a valid tax invoice
+                    Not a valid invoice
                   </p>
                 )}
 
@@ -366,13 +328,6 @@ export function A4InvoicePrint({
                     </span>{" "}
                     {formatDate(invoice.due_date)}
                   </p>
-
-                  <p>
-                    <span className="font-semibold text-gray-800">
-                      Place of Supply:
-                    </span>{" "}
-                    {stateLabel(placeOfSupply)}
-                  </p>
                 </div>
               </div>
             </div>
@@ -397,12 +352,6 @@ export function A4InvoicePrint({
                 {invoice.customer?.billing_address && (
                   <p className="text-gray-600 mt-0.5">
                     Address: {invoice.customer.billing_address}
-                  </p>
-                )}
-
-                {invoice.customer?.gstin && (
-                  <p className="font-medium text-gray-800 mt-1">
-                    GSTIN: {invoice.customer.gstin}
                   </p>
                 )}
               </div>
@@ -452,17 +401,11 @@ export function A4InvoicePrint({
                     <th className="py-2 px-3 text-left">
                       Item &amp; Description
                     </th>
-                    <th className="py-2 px-3 text-center w-20">
-                      HSN/SAC
-                    </th>
                     <th className="py-2 px-3 text-right w-16">
                       Qty
                     </th>
                     <th className="py-2 px-3 text-right w-24">
                       Rate
-                    </th>
-                    <th className="py-2 px-3 text-right w-20">
-                      GST %
                     </th>
                     <th className="py-2 px-3 text-right w-20">
                       Disc %
@@ -496,10 +439,6 @@ export function A4InvoicePrint({
                           )}
                         </td>
 
-                        <td className="py-2.5 px-3 text-center text-gray-600">
-                          {item.hsn_sac || item.product?.hsn_sac || "—"}
-                        </td>
-
                         <td className="py-2.5 px-3 text-right font-medium">
                           {item.quantity}{" "}
                           {item.product?.unit_of_measure || ""}
@@ -507,12 +446,6 @@ export function A4InvoicePrint({
 
                         <td className="py-2.5 px-3 text-right text-gray-700">
                           {formatCurrency(Number(item.unit_price))}
-                        </td>
-
-                        <td className="py-2.5 px-3 text-right text-gray-700">
-                          {item.tax_rate > 0
-                            ? `${item.tax_rate}%`
-                            : "0%"}
                         </td>
 
                         <td className="py-2.5 px-3 text-right text-gray-700">
@@ -531,7 +464,7 @@ export function A4InvoicePrint({
                   ) : (
                     <tr>
                       <td
-                        colSpan={8}
+                        colSpan={6}
                         className="py-4 text-center text-gray-400"
                       >
                         No line items found.
@@ -568,38 +501,16 @@ export function A4InvoicePrint({
                     </tr>
                   )}
 
-                  <tr>
-                    <td className="text-gray-600 font-medium">
-                      Taxable Value:
-                    </td>
-
-                    <td className="text-right font-semibold">
-                      {formatCurrency(taxableTotal)}
-                    </td>
-                  </tr>
-
-                  {supplyType === "inter" ? (
+                  {legacyTax > 0 && (
                     <tr>
-                      <td className="text-gray-600 font-medium">IGST:</td>
+                      <td className="text-gray-600 font-medium">
+                        Tax (as billed):
+                      </td>
+
                       <td className="text-right font-semibold">
-                        {formatCurrency(taxTotal)}
+                        {formatCurrency(legacyTax)}
                       </td>
                     </tr>
-                  ) : (
-                    <>
-                      <tr>
-                        <td className="text-gray-600 font-medium">CGST:</td>
-                        <td className="text-right font-semibold">
-                          {formatCurrency(taxSplit.cgst)}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className="text-gray-600 font-medium">SGST:</td>
-                        <td className="text-right font-semibold">
-                          {formatCurrency(taxSplit.sgst)}
-                        </td>
-                      </tr>
-                    </>
                   )}
 
                   <tr className="border-t border-gray-300 font-bold bg-white text-sm">
@@ -640,58 +551,6 @@ export function A4InvoicePrint({
               <span className="font-semibold">Amount in words: </span>
               {amountInWords(totalAmt)}
             </p>
-
-            {/* Rate-wise GST summary */}
-            {taxRows.length > 0 && (
-              <table className="w-full text-[10px] border border-gray-200">
-                <thead>
-                  <tr className="bg-gray-50 text-gray-600">
-                    <th className="py-1 px-2 text-left">GST Rate</th>
-                    <th className="py-1 px-2 text-right">Taxable Value</th>
-                    {supplyType === "inter" ? (
-                      <th className="py-1 px-2 text-right">IGST</th>
-                    ) : (
-                      <>
-                        <th className="py-1 px-2 text-right">CGST</th>
-                        <th className="py-1 px-2 text-right">SGST</th>
-                      </>
-                    )}
-                    <th className="py-1 px-2 text-right">Total Tax</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {taxRows.map((row) => (
-                    <tr key={row.rate} className="border-t border-gray-200">
-                      <td className="py-1 px-2">
-                        {supplyType === "inter"
-                          ? `${row.rate}%`
-                          : `${row.rate / 2}% + ${row.rate / 2}%`}
-                      </td>
-                      <td className="py-1 px-2 text-right">
-                        {formatCurrency(row.taxable)}
-                      </td>
-                      {supplyType === "inter" ? (
-                        <td className="py-1 px-2 text-right">
-                          {formatCurrency(row.igst)}
-                        </td>
-                      ) : (
-                        <>
-                          <td className="py-1 px-2 text-right">
-                            {formatCurrency(row.cgst)}
-                          </td>
-                          <td className="py-1 px-2 text-right">
-                            {formatCurrency(row.sgst)}
-                          </td>
-                        </>
-                      )}
-                      <td className="py-1 px-2 text-right">
-                        {formatCurrency(row.totalTax)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
 
             {invoice.notes && (
               <div className="border-t border-gray-200 pt-3 text-xs">

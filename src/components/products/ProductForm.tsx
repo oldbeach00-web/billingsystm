@@ -22,11 +22,9 @@ export function ProductForm({ initialData }: ProductFormProps) {
     name: initialData?.name || "",
     sku: initialData?.sku || "",
     description: initialData?.description || "",
-    hsn_sac: initialData?.hsn_sac || "",
     category_id: initialData?.category_id || "",
     unit_price: initialData?.unit_price?.toString() || "",
     cost_price: initialData?.cost_price?.toString() || "",
-    tax_rate: initialData?.tax_rate?.toString() || "0",
     unit_of_measure: initialData?.unit_of_measure || "pcs",
     stock_quantity: initialData?.stock_quantity?.toString() || "0",
     min_stock_level: initialData?.min_stock_level?.toString() || "0",
@@ -82,11 +80,9 @@ export function ProductForm({ initialData }: ProductFormProps) {
       name: formData.name,
       sku: formData.sku,
       description: formData.description || null,
-      hsn_sac: formData.hsn_sac || null,
       category_id: formData.category_id || null,
       unit_price: parseFloat(formData.unit_price) || 0,
       cost_price: parseFloat(formData.cost_price) || 0,
-      tax_rate: parseFloat(formData.tax_rate) || 0,
       unit_of_measure: formData.unit_of_measure,
       min_stock_level: Math.max(0, parseFloat(formData.min_stock_level) || 0),
     };
@@ -104,6 +100,8 @@ export function ProductForm({ initialData }: ProductFormProps) {
       const { error: insertError } = await (db.from("products") as { update: (data: unknown) => { eq: (k: string, v: string) => Promise<{error: {message: string} | null}> }, insert: (data: unknown[]) => Promise<{error: {message: string} | null}>, select: (s: string) => { eq: (k: string, v: string) => { single: () => Promise<{data: unknown, error: {message: string} | null}> } } })
         .insert([{
           ...payload,
+          // GST is no longer charged; edits leave older products' stored rate untouched
+          tax_rate: 0,
           stock_quantity: Math.max(0, parseFloat(formData.stock_quantity) || 0),
           sku: await generateNextSku(getProductCode(formData.name)),
         }]);
@@ -193,18 +191,6 @@ export function ProductForm({ initialData }: ProductFormProps) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  HSN / SAC Code
-                </label>
-                <input
-                  type="text"
-                  name="hsn_sac"
-                  value={formData.hsn_sac}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Category
                 </label>
                 <select
@@ -283,20 +269,6 @@ export function ProductForm({ initialData }: ProductFormProps) {
                   name="unit_price"
                   required
                   value={formData.unit_price}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  GST (%) *
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  name="tax_rate"
-                  required
-                  value={formData.tax_rate}
                   onChange={handleChange}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />

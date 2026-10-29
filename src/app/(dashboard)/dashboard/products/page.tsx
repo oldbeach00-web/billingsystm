@@ -272,10 +272,7 @@ export default function ProductsPage() {
                       </span>
 
                       <span className="text-xs text-gray-500 dark:text-gray-400">
-                        SKU: {prod.sku}{" "}
-                        {prod.hsn_sac
-                          ? `• HSN: ${prod.hsn_sac}`
-                          : ""}
+                        SKU: {prod.sku}
                       </span>
                     </div>
                   </td>
@@ -285,15 +282,9 @@ export default function ProductsPage() {
                   </td>
 
                   <td className="px-6 py-4 whitespace-nowrap text-right">
-                    <div className="flex flex-col">
-                      <span className="text-sm font-medium text-gray-900 dark:text-white">
-                        {formatCurrency(prod.unit_price)}
-                      </span>
-
-                      <span className="text-xs text-gray-500 dark:text-gray-400">
-                        + {prod.tax_rate}% GST
-                      </span>
-                    </div>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                      {formatCurrency(prod.unit_price)}
+                    </span>
                   </td>
 
                   <td className="px-6 py-4 whitespace-nowrap text-right">
