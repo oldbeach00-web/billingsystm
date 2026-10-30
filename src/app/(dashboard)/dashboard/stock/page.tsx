@@ -6,7 +6,6 @@ import type {
   Product,
   StockMovement,
   Category,
-  UserProfile,
 } from "@/types/database";
 import {
   Package,
@@ -30,7 +29,6 @@ type ProductWithCategory = Product & {
 
 type MovementWithRelations = StockMovement & {
   product?: Product;
-  user?: UserProfile;
 };
 
 type FetchDataResult = {
@@ -99,7 +97,9 @@ export default function StockPage() {
 
     const { data, error: fetchError } = await db
       .from("stock_movements")
-      .select("*, product:products(*), user:user_profiles(*)")
+      // stock_movements has no foreign key to user_profiles, so PostgREST
+      // can't join them (and the page never showed the user anyway)
+      .select("*, product:products(*)")
       .order("created_at", { ascending: false })
       .limit(100);
 
@@ -115,7 +115,6 @@ export default function StockPage() {
       data as Array<
         StockMovement & {
           product?: Product | Product[];
-          user?: UserProfile | UserProfile[];
         }
       >
     ).map((movement) => ({
@@ -123,9 +122,6 @@ export default function StockPage() {
       product: Array.isArray(movement.product)
         ? movement.product[0]
         : movement.product,
-      user: Array.isArray(movement.user)
-        ? movement.user[0]
-        : movement.user,
     }));
 
     return {
