@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Pencil, Archive, FilePlus2, Wallet, Ban, Loader2 } from "lucide-react";
+import { Plus, Pencil, Archive, FilePlus2, Wallet, Ban, Loader2, Trash2 } from "lucide-react";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
 import { localDateString, round2 } from "@/lib/billing";
 import { db } from "@/lib/db";
 import {
+  accountsFor,
   check,
+  initialAccountId,
   fdb,
   loadAll,
   type FinanceAccount,
@@ -18,6 +20,7 @@ import {
 } from "@/lib/finance";
 import {
   AccountSelect,
+  accountProblem,
   ErrorBanner,
   Field,
   Loading,
@@ -73,7 +76,7 @@ function buildSupplierLedger(
       .map((b) => ({
         key: `b-${b.id}`, date: b.bill_date, type: "Bill",
         details: `Bill ${b.bill_number || ""}${b.notes ? ` · ${b.notes}` : ""}`,
-        billed: b.amount, paid: 0, mode: "",
+        billed: b.amount, paid: 0, mode: "", paymentId: "",
       })),
     ...payments
       .filter((p) => p.supplier_id === selected)
@@ -82,7 +85,7 @@ function buildSupplierLedger(
         return {
           key: `p-${p.id}`, date: p.payment_date, type: "Payment",
           details: `${bill ? `Against bill ${bill.bill_number || ""}` : "On account"}${p.reference ? ` · ${p.reference}` : ""}${p.notes ? ` · ${p.notes}` : ""}`,
-          billed: 0, paid: p.amount, mode: p.payment_mode,
+          billed: 0, paid: p.amount, mode: p.payment_mode, paymentId: p.id,
         };
       }),
   ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.type === "Bill" ? -1 : 1));
@@ -166,7 +169,6 @@ export default function SuppliersPage() {
     if (!supplierForm) return;
     if (!supplierForm.name.trim()) return setFormError("Enter the supplier's name.");
     const opening = round2(parseFloat(supplierForm.opening_balance) || 0);
-    if (opening < 0) return setFormError("Opening balance cannot be negative.");
     const payload = {
       name: supplierForm.name.trim(),
       phone: supplierForm.phone.trim() || null,
@@ -228,7 +230,7 @@ export default function SuppliersPage() {
       amount: bill ? String(bill.amount_due) : "",
       payment_date: localDateString(),
       payment_mode: "cash",
-      account_id: "",
+      account_id: initialAccountId(accounts, "cash"),
       reference: "",
       notes: "",
     });
@@ -240,6 +242,8 @@ export default function SuppliersPage() {
     const amount = round2(parseFloat(payForm.amount));
     if (!payForm.supplier_id) return setFormError("Choose a supplier.");
     if (!(amount > 0)) return setFormError("Enter an amount greater than 0.");
+    const problem = accountProblem(accounts, payForm.payment_mode, payForm.account_id);
+    if (problem) return setFormError(problem);
     void run(async () => {
       // pay_supplier locks the bill and re-checks its balance on the server
       const { error: err } = await db.rpc("pay_supplier", {
@@ -247,13 +251,20 @@ export default function SuppliersPage() {
         p_bill_id: payForm.bill_id || null,
         p_amount: amount,
         p_payment_mode: payForm.payment_mode,
-        p_account_id: payForm.account_id || null,
+        p_account_id: payForm.account_id,
         p_payment_date: payForm.payment_date,
         p_reference: payForm.reference,
         p_notes: payForm.notes,
       });
       check(err as { message?: string; code?: string } | null, "Could not record the payment");
     }, () => setPayForm(null));
+  };
+
+  const deletePayment = async (paymentId: string, amount: number) => {
+    if (!window.confirm(`Delete this ${formatCurrency(amount)} payment? The bill it paid becomes due again.`)) return;
+    const { error: err } = await db.rpc("delete_supplier_payment", { p_payment_id: paymentId });
+    if (err) setError((err as { message?: string }).message || "Could not delete the payment.");
+    else await reload();
   };
 
   const selectedBills = bills.filter((b) => b.supplier_id === selected);
@@ -355,12 +366,14 @@ export default function SuppliersPage() {
                     <th className="px-4 py-2 text-right">Bill</th>
                     <th className="px-4 py-2 text-right">Paid</th>
                     <th className="px-4 py-2 text-right">Balance</th>
+                    <th className="px-4 py-2" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-gray-700 dark:text-gray-300">
                   <tr className="bg-gray-50/50 dark:bg-gray-900/20">
-                    <td className="px-4 py-2" colSpan={4}>Opening balance</td>
+                    <td className="px-4 py-2" colSpan={4}>Opening balance{ledger.opening < 0 ? " (advance paid)" : ""}</td>
                     <td className="px-4 py-2 text-right font-semibold">{formatCurrency(ledger.opening)}</td>
+                    <td />
                   </tr>
                   {ledger.rows.map((r) => (
                     <tr key={r.key}>
@@ -369,6 +382,13 @@ export default function SuppliersPage() {
                       <td className="px-4 py-2 text-right">{r.billed ? formatCurrency(r.billed) : ""}</td>
                       <td className="px-4 py-2 text-right text-emerald-600">{r.paid ? formatCurrency(r.paid) : ""}</td>
                       <td className="px-4 py-2 text-right font-semibold">{formatCurrency(r.balance)}</td>
+                      <td className="px-4 py-2 text-right">
+                        {r.paymentId && (
+                          <button onClick={() => deletePayment(r.paymentId, r.paid)} className="text-red-600 hover:text-red-900" title="Delete payment (correct a mistake)">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -435,7 +455,7 @@ export default function SuppliersPage() {
               <Field label="Phone"><input value={supplierForm.phone} onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })} className={inputClass} /></Field>
               <Field label="Email"><input type="email" value={supplierForm.email} onChange={(e) => setSupplierForm({ ...supplierForm, email: e.target.value })} className={inputClass} /></Field>
               <Field label="GSTIN"><input value={supplierForm.gstin} onChange={(e) => setSupplierForm({ ...supplierForm, gstin: e.target.value })} className={inputClass} /></Field>
-              <Field label="Opening balance (₹)" hint="Amount you already owe them"><input type="number" min="0" step="0.01" value={supplierForm.opening_balance} onChange={(e) => setSupplierForm({ ...supplierForm, opening_balance: e.target.value })} className={inputClass} /></Field>
+              <Field label="Opening balance (₹)" hint="Already owed to them; use a negative amount for an advance you paid"><input type="number" step="0.01" value={supplierForm.opening_balance} onChange={(e) => setSupplierForm({ ...supplierForm, opening_balance: e.target.value })} className={inputClass} /></Field>
             </div>
             <Field label="Address"><input value={supplierForm.address} onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })} className={inputClass} /></Field>
             <Field label="Notes"><input value={supplierForm.notes} onChange={(e) => setSupplierForm({ ...supplierForm, notes: e.target.value })} className={inputClass} /></Field>
@@ -501,13 +521,13 @@ export default function SuppliersPage() {
               <Field label="Amount (₹) *"><input type="number" min="0.01" step="0.01" required value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} className={inputClass} /></Field>
               <Field label="Paid on"><input type="date" required value={payForm.payment_date} onChange={(e) => setPayForm({ ...payForm, payment_date: e.target.value })} className={inputClass} /></Field>
             </div>
-            <Field label="Payment mode"><ModeSelect value={payForm.payment_mode} onChange={(m) => setPayForm({ ...payForm, payment_mode: m, account_id: "" })} /></Field>
+            <Field label="Payment mode"><ModeSelect value={payForm.payment_mode} onChange={(m) => setPayForm({ ...payForm, payment_mode: m, account_id: initialAccountId(accounts, m) })} /></Field>
             <Field label="Account"><AccountSelect accounts={accounts} mode={payForm.payment_mode} value={payForm.account_id} onChange={(id) => setPayForm({ ...payForm, account_id: id })} /></Field>
             <Field label="Reference (UPI ref / cheque no.)"><input value={payForm.reference} onChange={(e) => setPayForm({ ...payForm, reference: e.target.value })} className={inputClass} /></Field>
             <Field label="Notes"><input value={payForm.notes} onChange={(e) => setPayForm({ ...payForm, notes: e.target.value })} className={inputClass} /></Field>
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setPayForm(null)} className={secondaryButton}>Cancel</button>
-              <button type="submit" disabled={isSaving} className={primaryButton}>{isSaving && <Loader2 className="w-4 h-4 animate-spin" />} Record Payment</button>
+              <button type="submit" disabled={isSaving || accountsFor(accounts, payForm.payment_mode).length === 0} className={primaryButton}>{isSaving && <Loader2 className="w-4 h-4 animate-spin" />} Record Payment</button>
             </div>
           </form>
         </Modal>

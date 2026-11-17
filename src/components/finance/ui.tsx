@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { X, AlertCircle, Loader2 } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
 import {
@@ -134,7 +135,11 @@ export function ModeSelect({
   );
 }
 
-/** Accounts of the chosen mode; blank = that mode's default account. */
+/**
+ * Required account picker for the chosen mode. Bank has no pre-selection;
+ * when no active account of the mode exists it shows how to add one and the
+ * form must not be saved (see `canSave`).
+ */
 export function AccountSelect({
   accounts,
   mode,
@@ -147,17 +152,40 @@ export function AccountSelect({
   onChange: (id: string) => void;
 }) {
   const options = accounts.filter((a) => a.kind === mode && a.is_active);
+  if (options.length === 0) {
+    return (
+      <div className="p-3 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-sm dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-700">
+        No {modeLabel(mode)} account has been added yet, so {modeLabel(mode)} payments can&apos;t be
+        recorded.{" "}
+        <Link href="/dashboard/accounts" className="font-semibold underline">
+          Add a {modeLabel(mode)} account on Bank &amp; Accounts
+        </Link>{" "}
+        first, or choose another payment mode.
+      </div>
+    );
+  }
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className={inputClass}>
-      <option value="">Default {modeLabel(mode)} account</option>
+    <select required value={value} onChange={(e) => onChange(e.target.value)} className={inputClass}>
+      <option value="" disabled>
+        Choose {modeLabel(mode)} account…
+      </option>
       {options.map((a) => (
         <option key={a.id} value={a.id}>
           {a.name}
+          {a.kind === "bank" && a.account_number ? ` · A/c ${a.account_number}` : ""}
           {a.is_default ? " (default)" : ""}
         </option>
       ))}
     </select>
   );
+}
+
+/** Whether a form's mode/account choice can be saved; returns the problem otherwise. */
+export function accountProblem(accounts: FinanceAccount[], mode: PaymentMode, accountId: string): string | null {
+  const options = accounts.filter((a) => a.kind === mode && a.is_active);
+  if (options.length === 0) return `Add a ${modeLabel(mode)} account on Bank & Accounts before recording ${modeLabel(mode)} payments.`;
+  if (!accountId || !options.some((a) => a.id === accountId)) return `Choose the ${modeLabel(mode)} account this money moved through.`;
+  return null;
 }
 
 export function Field({

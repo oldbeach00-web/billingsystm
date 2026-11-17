@@ -8,7 +8,9 @@ import {
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
   PAYMENT_MODES,
+  accountsFor,
   check,
+  initialAccountId,
   fdb,
   inRange,
   loadAll,
@@ -18,6 +20,7 @@ import {
 } from "@/lib/finance";
 import {
   AccountSelect,
+  accountProblem,
   DateRange,
   ErrorBanner,
   Field,
@@ -106,7 +109,7 @@ export default function IncomeExpensePage() {
 
   const openNew = (type: EntryType) => {
     setEditing(null);
-    setForm(emptyForm(type));
+    setForm({ ...emptyForm(type), account_id: initialAccountId(accounts, "cash") });
     setFormError(null);
   };
 
@@ -131,6 +134,8 @@ export default function IncomeExpensePage() {
     const amount = round2(parseFloat(form.amount));
     if (!(amount > 0)) return setFormError("Enter an amount greater than 0.");
     if (!form.category.trim()) return setFormError("Choose or type a category.");
+    const problem = accountProblem(accounts, form.payment_mode, form.account_id);
+    if (problem) return setFormError(problem);
 
     setIsSaving(true);
     setFormError(null);
@@ -142,7 +147,7 @@ export default function IncomeExpensePage() {
         description: form.description.trim() || null,
         amount,
         payment_mode: form.payment_mode,
-        account_id: form.account_id || null,
+        account_id: form.account_id,
         reference: form.reference.trim() || null,
       };
       const { error: err } = editing
@@ -312,7 +317,7 @@ export default function IncomeExpensePage() {
               <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={inputClass} />
             </Field>
             <Field label="Payment mode">
-              <ModeSelect value={form.payment_mode} onChange={(m) => setForm({ ...form, payment_mode: m, account_id: "" })} />
+              <ModeSelect value={form.payment_mode} onChange={(m) => setForm({ ...form, payment_mode: m, account_id: initialAccountId(accounts, m) })} />
             </Field>
             <Field label="Account">
               <AccountSelect accounts={accounts} mode={form.payment_mode} value={form.account_id} onChange={(id) => setForm({ ...form, account_id: id })} />
@@ -322,7 +327,7 @@ export default function IncomeExpensePage() {
             </Field>
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setForm(null)} className={secondaryButton}>Cancel</button>
-              <button type="submit" disabled={isSaving} className={primaryButton}>
+              <button type="submit" disabled={isSaving || accountsFor(accounts, form.payment_mode).length === 0} className={primaryButton}>
                 {isSaving && <Loader2 className="w-4 h-4 animate-spin" />} Save
               </button>
             </div>

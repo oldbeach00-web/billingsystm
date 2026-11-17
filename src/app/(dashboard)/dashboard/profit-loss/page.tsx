@@ -12,6 +12,7 @@ import {
   type FinanceEntry,
   type LedgerRow,
   type PaymentMode,
+  type SalaryPayment,
   type SupplierBill,
 } from "@/lib/finance";
 import {
@@ -35,15 +36,16 @@ interface BilledInvoice {
 }
 
 const loadPage = async () => {
-  const [ledger, entries, invoices, bills] = await Promise.all([
+  const [ledger, entries, invoices, bills, salaries] = await Promise.all([
     loadAll<LedgerRow>("money_ledger", "entry_date"),
     loadAll<FinanceEntry>("finance_entries", "entry_date"),
     loadAll<BilledInvoice>("invoices", "issue_date", true, (q) =>
       q.not("status", "in", "(draft,cancelled)")
     ),
     loadAll<SupplierBill>("supplier_bills", "bill_date", true, (q) => q.neq("status", "cancelled")),
+    loadAll<SalaryPayment>("salary_payments", "salary_month"),
   ]);
-  return { ledger, entries, invoices, bills };
+  return { ledger, entries, invoices, bills, salaries };
 };
 
 function Row({
@@ -82,6 +84,7 @@ export default function ProfitLossPage() {
     entries: [] as FinanceEntry[],
     invoices: [] as BilledInvoice[],
     bills: [] as SupplierBill[],
+    salaries: [] as SalaryPayment[],
   });
 
   const [from, setFrom] = useState(() => {
@@ -104,15 +107,20 @@ export default function ProfitLossPage() {
     const purchases = round2(
       data.bills.filter((b) => inRange(b.bill_date, from, to)).reduce((s, b) => s + b.amount, 0)
     );
+    // Salaries by the month they are for (not the day they were paid)
+    const salaries = round2(
+      data.salaries
+        .filter((s) => inRange(s.salary_month, from ? `${from.slice(0, 7)}-01` : "", to))
+        .reduce((sum, s) => sum + s.amount, 0)
+    );
     const all = computeProfitAndLoss(data.ledger, data.entries, from, to, "all");
-    const otherCosts = round2(all.salaries + all.expenses);
     return {
       sales,
       otherIncome: all.otherIncome,
       purchases,
-      salaries: all.salaries,
+      salaries,
       expenses: all.expenses,
-      net: round2(sales + all.otherIncome - purchases - otherCosts),
+      net: round2(sales + all.otherIncome - purchases - salaries - all.expenses),
     };
   }, [data, from, to]);
 
@@ -157,11 +165,15 @@ export default function ProfitLossPage() {
                 Cash-basis statement {mode !== "all" && <ModeBadge mode={mode} />}
               </h3>
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                Money actually received and paid. Transfers between your own accounts are not counted.
+                Money actually received and paid, by date. Supplier payments count as expenses when paid
+                (stock still on the shelf is not valued). Refunds reduce sales on the day they are paid back.
+                Transfers between your own accounts are not counted.
               </p>
               <div className="text-gray-700 dark:text-gray-300">
                 <p className="text-xs font-semibold uppercase text-gray-500 mt-2">Income</p>
-                <Row label="Sales collected from customers" amount={pl.salesCollected} />
+                <Row label="Received from customers" amount={pl.salesReceived} />
+                {pl.refunds > 0 && <Row label="Less: refunds on cancelled invoices" amount={pl.refunds} negative indent />}
+                <Row label="Sales collected (net)" amount={pl.salesCollected} />
                 <Row label="Other income" amount={pl.otherIncome} />
                 <Row label="Total income" amount={pl.totalIncome} strong />
 
@@ -213,7 +225,8 @@ export default function ProfitLossPage() {
               <div className={cn(cardClass, "p-5")}>
                 <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Billed basis (all modes)</h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                  Sales and purchases by bill date, including amounts not yet collected or paid.
+                  Sales and purchases by bill date and salaries by the month they are for, including amounts not
+                  yet collected or paid. Other income and expenses are by entry date.
                 </p>
                 <div className="text-gray-700 dark:text-gray-300">
                   <Row label="Sales billed" amount={accrual.sales} />

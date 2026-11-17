@@ -21,6 +21,20 @@ export function modeLabel(mode: string): string {
   return PAYMENT_MODES.find((m) => m.value === mode)?.label ?? mode;
 }
 
+/** Active accounts that can be used for a payment mode. */
+export function accountsFor(accounts: FinanceAccount[], mode: PaymentMode): FinanceAccount[] {
+  return accounts.filter((a) => a.kind === mode && a.is_active);
+}
+
+/**
+ * Account to pre-select for a mode: the default Cash / UPI account. Bank is
+ * never pre-selected — the accountant must choose the bank account.
+ */
+export function initialAccountId(accounts: FinanceAccount[], mode: PaymentMode): string {
+  if (mode === "bank") return "";
+  return accountsFor(accounts, mode).find((a) => a.is_default)?.id ?? "";
+}
+
 export interface FinanceAccount {
   id: string;
   name: string;
@@ -138,6 +152,7 @@ export interface AccountTransfer {
 
 export type LedgerSource =
   | "customer_payment"
+  | "customer_refund"
   | "income"
   | "expense"
   | "salary"
@@ -151,6 +166,7 @@ export interface LedgerRow {
   direction: 1 | -1;
   amount: number;
   mode: PaymentMode;
+  /** Account the money moved through, fixed when it was recorded */
   account_id: string | null;
   description: string;
   party: string;
@@ -229,6 +245,11 @@ export const EXPENSE_CATEGORIES = [
 ];
 
 export interface ProfitAndLoss {
+  /** Customer payments received, before refunds */
+  salesReceived: number;
+  /** Refunds paid back on cancelled invoices */
+  refunds: number;
+  /** salesReceived − refunds */
   salesCollected: number;
   otherIncome: number;
   totalIncome: number;
@@ -244,7 +265,9 @@ export interface ProfitAndLoss {
 /**
  * Cash-basis profit & loss: money actually received and paid in the period,
  * optionally for one payment mode. Transfers between your own accounts are
- * not income or expense, so they are left out.
+ * not income or expense, so they are left out. Refunds reduce sales in the
+ * period they were paid back. Supplier payments count as expenses when paid
+ * (stock still on hand is not valued).
  */
 export function computeProfitAndLoss(
   ledger: LedgerRow[],
@@ -263,7 +286,9 @@ export function computeProfitAndLoss(
   const sum = (source: LedgerSource) =>
     round2(rows.filter((r) => r.source === source).reduce((s, r) => s + r.amount, 0));
 
-  const salesCollected = sum("customer_payment");
+  const salesReceived = sum("customer_payment");
+  const refunds = sum("customer_refund");
+  const salesCollected = round2(salesReceived - refunds);
   const otherIncome = sum("income");
   const supplierPayments = sum("supplier_payment");
   const salaries = sum("salary");
@@ -287,6 +312,8 @@ export function computeProfitAndLoss(
   });
 
   return {
+    salesReceived,
+    refunds,
     salesCollected,
     otherIncome,
     totalIncome,

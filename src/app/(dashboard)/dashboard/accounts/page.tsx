@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Plus, Pencil, ArrowLeftRight, Trash2, Loader2, Landmark } from "lucide-react";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
+import { db } from "@/lib/db";
 import { localDateString, round2 } from "@/lib/billing";
 import {
   PAYMENT_MODES,
@@ -35,6 +36,7 @@ import { useLoad } from "@/components/finance/useLoad";
 
 const SOURCE_LABELS: Record<string, string> = {
   customer_payment: "Customer payment",
+  customer_refund: "Customer refund",
   income: "Income",
   expense: "Expense",
   salary: "Salary",
@@ -50,7 +52,12 @@ const loadPage = async () => {
     loadAll<LedgerRow>("money_ledger", "entry_date"),
     loadAll<AccountTransfer>("account_transfers", "transfer_date", false),
   ]);
-  return { accounts, balances, ledger, transfers };
+  // Customer payments with no account to go to (e.g. a card/bank payment
+  // recorded before any bank account was made default)
+  const unassigned = await loadAll<{ payment_id: string; amount: number; mode: string }>(
+    "unassigned_customer_payments", "entry_date"
+  );
+  return { accounts, balances, ledger, transfers, unassigned };
 };
 
 type AccountForm = {
@@ -72,8 +79,9 @@ export default function AccountsPage() {
     balances: [] as AccountBalance[],
     ledger: [] as LedgerRow[],
     transfers: [] as AccountTransfer[],
+    unassigned: [] as { payment_id: string; amount: number; mode: string }[],
   });
-  const { accounts, balances, ledger, transfers } = data;
+  const { accounts, balances, ledger, transfers, unassigned } = data;
 
   const [selectedId, setSelectedId] = useState<string>("");
   const [from, setFrom] = useState("");
@@ -148,21 +156,32 @@ export default function AccountsPage() {
       opening_balance: opening,
       notes: accountForm.notes.trim() || null,
     };
+    const wasDefault = accounts.find((a) => a.id === accountForm.id)?.is_default ?? false;
+    if (accountForm.is_default && !wasDefault) {
+      const ok = window.confirm(
+        `Make "${payload.name}" the default ${modeLabel(accountForm.kind)} account?\n\n` +
+          `Customer payments recorded from now on go to it. Past transactions and statements stay exactly as they are.`
+      );
+      if (!ok) return;
+    }
     void run(async () => {
-      // Only one default account per mode: clear the old default first
-      if (accountForm.is_default) {
-        const { error: err } = await fdb("finance_accounts")
-          .update({ is_default: false })
-          .eq("kind", accountForm.kind)
-          .eq("is_default", true)
-          .neq("id", accountForm.id ?? "00000000-0000-0000-0000-000000000000");
-        check(err, "Could not update the default account");
+      let id = accountForm.id;
+      if (id) {
+        const { error: err } = await fdb("finance_accounts").update(payload).eq("id", id);
+        check(err, "Could not save the account");
+      } else {
+        const { data: created, error: err } = await fdb("finance_accounts")
+          .insert([payload])
+          .select("id")
+          .single();
+        check(err, "Could not save the account");
+        id = (created as { id: string }).id;
       }
-      const full = { ...payload, is_default: accountForm.is_default };
-      const { error: err } = accountForm.id
-        ? await fdb("finance_accounts").update(full).eq("id", accountForm.id)
-        : await fdb("finance_accounts").insert([full]);
-      check(err, "Could not save the account");
+      // set_default_account logs the change, so past statements never move
+      if (accountForm.is_default && !wasDefault) {
+        const { error: err } = await db.rpc("set_default_account", { p_account_id: id });
+        check(err as { message?: string; code?: string } | null, "Could not make it the default account");
+      }
     }, () => setAccountForm(null));
   };
 
@@ -232,6 +251,15 @@ export default function AccountsPage() {
       </PageHeader>
 
       <ErrorBanner message={error} />
+
+      {unassigned.length > 0 && (
+        <div className="p-4 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-sm dark:bg-amber-900/20 dark:text-amber-300">
+          {unassigned.length} customer payment{unassigned.length > 1 ? "s" : ""} (
+          {formatCurrency(unassigned.reduce((s, u) => s + Number(u.amount), 0))}) by{" "}
+          {Array.from(new Set(unassigned.map((u) => modeLabel(u.mode)))).join(", ")} have no account yet. Add a
+          bank account and make it the default to place them; they are not in any balance until then.
+        </div>
+      )}
 
       {isLoading ? (
         <Loading />
@@ -407,8 +435,21 @@ export default function AccountsPage() {
               <input type="number" step="0.01" value={accountForm.opening_balance} onChange={(e) => setAccountForm({ ...accountForm, opening_balance: e.target.value })} className={inputClass} />
             </Field>
             <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
-              <input type="checkbox" className="mt-1" checked={accountForm.is_default} onChange={(e) => setAccountForm({ ...accountForm, is_default: e.target.checked })} />
-              <span>Default {modeLabel(accountForm.kind)} account — customer payments and entries without an account go here.</span>
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={accountForm.is_default}
+                disabled={!!accounts.find((x) => x.id === accountForm.id)?.is_default}
+                onChange={(e) => setAccountForm({ ...accountForm, is_default: e.target.checked })}
+              />
+              <span>
+                Default {modeLabel(accountForm.kind)} account — customer payments recorded by{" "}
+                {modeLabel(accountForm.kind)} from now on go here. Changing the default never moves past
+                transactions.
+                {accountForm.id && accounts.find((a) => a.id === accountForm.id)?.is_default && (
+                  <span className="block text-xs text-gray-500">To change it, make another account the default.</span>
+                )}
+              </span>
             </label>
             <Field label="Notes"><input value={accountForm.notes} onChange={(e) => setAccountForm({ ...accountForm, notes: e.target.value })} className={inputClass} /></Field>
             <div className="flex justify-end gap-2 pt-2">

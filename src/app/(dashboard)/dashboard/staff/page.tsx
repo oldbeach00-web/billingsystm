@@ -5,8 +5,10 @@ import { Plus, Pencil, Archive, Trash2, Wallet, Loader2 } from "lucide-react";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
 import { localDateString, round2 } from "@/lib/billing";
 import {
+  accountsFor,
   check,
   fdb,
+  initialAccountId,
   loadAll,
   monthLabel,
   monthStart,
@@ -17,6 +19,7 @@ import {
 } from "@/lib/finance";
 import {
   AccountSelect,
+  accountProblem,
   ErrorBanner,
   Field,
   Loading,
@@ -161,7 +164,7 @@ export default function StaffPage() {
       amount: s.pending > 0 ? String(s.pending) : "",
       payment_date: localDateString(),
       payment_mode: "cash",
-      account_id: "",
+      account_id: initialAccountId(accounts, "cash"),
       notes: "",
     });
   };
@@ -172,6 +175,8 @@ export default function StaffPage() {
     const amount = round2(parseFloat(payForm.amount));
     if (!payForm.staff_id) return setFormError("Choose a staff member.");
     if (!(amount > 0)) return setFormError("Enter an amount greater than 0.");
+    const problem = accountProblem(accounts, payForm.payment_mode, payForm.account_id);
+    if (problem) return setFormError(problem);
     void run(async () => {
       const { error: err } = await fdb("salary_payments").insert([
         {
@@ -180,7 +185,7 @@ export default function StaffPage() {
           payment_date: payForm.payment_date,
           amount,
           payment_mode: payForm.payment_mode,
-          account_id: payForm.account_id || null,
+          account_id: payForm.account_id,
           notes: payForm.notes.trim() || null,
         },
       ]);
@@ -204,7 +209,7 @@ export default function StaffPage() {
         <button
           onClick={() => {
             setFormError(null);
-            setPayForm({ staff_id: "", month, amount: "", payment_date: localDateString(), payment_mode: "cash", account_id: "", notes: "" });
+            setPayForm({ staff_id: "", month, amount: "", payment_date: localDateString(), payment_mode: "cash", account_id: initialAccountId(accounts, "cash"), notes: "" });
           }}
           className={secondaryButton}
         >
@@ -393,7 +398,7 @@ export default function StaffPage() {
               <input type="number" min="0.01" step="0.01" required value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} className={inputClass} />
             </Field>
             <Field label="Payment mode">
-              <ModeSelect value={payForm.payment_mode} onChange={(m) => setPayForm({ ...payForm, payment_mode: m, account_id: "" })} />
+              <ModeSelect value={payForm.payment_mode} onChange={(m) => setPayForm({ ...payForm, payment_mode: m, account_id: initialAccountId(accounts, m) })} />
             </Field>
             <Field label="Account">
               <AccountSelect accounts={accounts} mode={payForm.payment_mode} value={payForm.account_id} onChange={(id) => setPayForm({ ...payForm, account_id: id })} />
@@ -403,7 +408,7 @@ export default function StaffPage() {
             </Field>
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setPayForm(null)} className={secondaryButton}>Cancel</button>
-              <button type="submit" disabled={isSaving} className={primaryButton}>{isSaving && <Loader2 className="w-4 h-4 animate-spin" />} Record Payment</button>
+              <button type="submit" disabled={isSaving || accountsFor(accounts, payForm.payment_mode).length === 0} className={primaryButton}>{isSaving && <Loader2 className="w-4 h-4 animate-spin" />} Record Payment</button>
             </div>
           </form>
         </Modal>
