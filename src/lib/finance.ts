@@ -181,6 +181,13 @@ export function fdb(table: string): any {
   return db.from(table) as any;
 }
 
+// Unique column(s) used as a tie-breaker so paging is stable. Views without
+// an "id" column need their own key.
+const TIEBREAK: Record<string, string[]> = {
+  money_ledger: ["source", "source_id"],
+  unassigned_customer_payments: ["payment_id"],
+};
+
 /** Loads every row of a finance table or view (no 1000-row cap). */
 export async function loadAll<T>(
   table: string,
@@ -190,7 +197,9 @@ export async function loadAll<T>(
 ): Promise<T[]> {
   const { data, error } = await fetchAllRows<T>(() => {
     const q = fdb(table).select("*");
-    return (build ? build(q) : q).order(order, { ascending }).order("id");
+    let ordered = (build ? build(q) : q).order(order, { ascending });
+    for (const key of TIEBREAK[table] ?? ["id"]) ordered = ordered.order(key);
+    return ordered;
   });
   if (error) throw new Error(error.message);
   return data.map((row) => normaliseNumbers(row));
