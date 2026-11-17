@@ -14,6 +14,7 @@ A production-grade, full-stack Billing & Inventory Management System built with 
 - **Invoice History & A4 Printable Layout**: Printable invoice template formatted to standard A4 dimensions (210mm x 297mm) with reprinting support.
 - **Customer & Due Management**: Track customer purchase history and manage outstanding invoice balances with payment history logs.
 - **Reports & Analytics**: Daily, Weekly, Monthly, Yearly sales totals, Product sales reports, Customer analytics, Stock reports, and Date Range filters.
+- **Finance**: Income & expenses, profit & loss (cash or billed basis, filterable by Cash / UPI / Bank), staff salaries, bank & payment accounts with transfers and statements, and a supplier ledger with purchase bills and payables.
 - **Shop Settings**: Dynamic store configuration (Name, Address, Phone, Email, Logo, Terms & Conditions) automatically integrated into printable invoices.
 
 ---
@@ -55,8 +56,13 @@ NEXT_PUBLIC_APP_TIMEZONE=Asia/Kolkata
    It adds `cancel_invoice`, which voids an invoice and returns its stock.
 4. Run `supabase/migrations/20261029000000_remove_gst.sql`. Invoices no longer
    charge GST; invoices issued before this keep their stored tax and totals.
-5. In Settings, enter your shop name and address.
-6. Authentication → Providers → Email: turn **off** "Allow new users to sign up".
+5. Run `supabase/migrations/20261117000000_finance_modules.sql`. It adds the
+   finance modules: Income & Expenses, Profit & Loss, Staff & Salaries,
+   Bank & Accounts and Suppliers (ledger and payables). It creates a default
+   "Cash in Hand" and "UPI" account; add your bank accounts on the Bank &
+   Accounts page.
+6. In Settings, enter your shop name and address.
+7. Authentication → Providers → Email: turn **off** "Allow new users to sign up".
 
 ---
 

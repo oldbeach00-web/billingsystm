@@ -14,6 +14,11 @@ import {
   Tag,
   ArrowLeftRight,
   X,
+  Wallet,
+  TrendingUp,
+  UserCog,
+  Landmark,
+  Truck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -64,6 +69,31 @@ const navItems: NavItem[] = [
     label: "Stock",
     href: "/dashboard/stock",
     icon: ArrowLeftRight,
+  },
+  {
+    label: "Income & Expenses",
+    href: "/dashboard/income-expense",
+    icon: Wallet,
+  },
+  {
+    label: "Profit & Loss",
+    href: "/dashboard/profit-loss",
+    icon: TrendingUp,
+  },
+  {
+    label: "Staff & Salaries",
+    href: "/dashboard/staff",
+    icon: UserCog,
+  },
+  {
+    label: "Bank & Accounts",
+    href: "/dashboard/accounts",
+    icon: Landmark,
+  },
+  {
+    label: "Suppliers",
+    href: "/dashboard/suppliers",
+    icon: Truck,
   },
   {
     label: "Reports",
