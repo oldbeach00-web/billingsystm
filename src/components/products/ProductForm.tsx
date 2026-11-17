@@ -283,17 +283,22 @@ export function ProductForm({ initialData }: ProductFormProps) {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Current Stock
                 </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  name="stock_quantity"
-                  required
-                  value={formData.stock_quantity}
-                  onChange={handleChange}
-                  disabled={!!initialData}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed"
-                />
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="stock_quantity"
+                    required
+                    value={formData.stock_quantity}
+                    onChange={handleChange}
+                    disabled={!!initialData}
+                    className="w-full pl-3 pr-14 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed"
+                  />
+                  <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-gray-500 dark:text-gray-400" aria-hidden="true">
+                    {formData.unit_of_measure}
+                  </span>
+                </div>
                 {initialData && (
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     Use the Stock page to adjust stock so every change is logged.
@@ -304,15 +309,20 @@ export function ProductForm({ initialData }: ProductFormProps) {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Minimum Stock Level
                 </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  name="min_stock_level"
-                  required
-                  value={formData.min_stock_level}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.01"
+                    name="min_stock_level"
+                    required
+                    value={formData.min_stock_level}
+                    onChange={handleChange}
+                    className="w-full pl-3 pr-14 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-gray-500 dark:text-gray-400" aria-hidden="true">
+                    {formData.unit_of_measure}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
