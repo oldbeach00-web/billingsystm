@@ -102,7 +102,8 @@ export default function AccountsPage() {
   const balanceOf = (id: string) => balances.find((b) => b.id === id)?.balance ?? 0;
   const accountName = (id: string) => accounts.find((a) => a.id === id)?.name ?? "—";
 
-  const totalsByMode = PAYMENT_MODES.map((m) => ({
+  // Summary cards show Cash and UPI only; bank balances are not summarised here.
+  const totalsByMode = PAYMENT_MODES.filter((m) => m.value !== "bank").map((m) => ({
     ...m,
     balance: round2(balances.filter((b) => b.kind === m.value && b.is_active).reduce((s, b) => s + b.balance, 0)),
   }));
@@ -229,7 +230,7 @@ export default function AccountsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Bank & Payment Accounts" subtitle="Cash, UPI and bank balances, transfers and account statements">
+      <PageHeader title="Bank & Payment Accounts" subtitle="Cash and UPI balances, transfers and account statements">
         <button
           onClick={() => {
             setFormError(null);
@@ -265,7 +266,7 @@ export default function AccountsPage() {
         <Loading />
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {totalsByMode.map((m) => (
               <StatCard key={m.value} label={`${m.label} balance`} value={m.balance} tone={m.balance < 0 ? "bad" : "default"} />
             ))}
