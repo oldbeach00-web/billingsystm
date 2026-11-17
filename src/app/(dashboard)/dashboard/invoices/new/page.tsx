@@ -137,8 +137,9 @@ export default function NewInvoicePage() {
   const [lines, setLines] = useState<BillLineItem[]>([newLineItem()]);
   const [globalDiscount, setGlobalDiscount] = useState(0);
 
-  // Stage 6 Payment state
-  const [paidAmountInput, setPaidAmountInput] = useState("0");
+  // Stage 6 Payment state: the bill can be paid by Cash, UPI or both
+  const [cashInput, setCashInput] = useState("0");
+  const [upiInput, setUpiInput] = useState("0");
 
   // Customer state
   const [customer, setCustomer] = useState<BillCustomer>({
@@ -196,7 +197,9 @@ export default function NewInvoicePage() {
             issueDate: string;
             dueDate: string;
             notes: string;
-            paidAmountInput: string;
+            cashInput?: string;
+            upiInput?: string;
+            paidAmountInput?: string; // drafts saved before split payments
           };
 
           // Re-link product objects from freshly loaded products
@@ -225,7 +228,8 @@ export default function NewInvoicePage() {
           setIssueDate(saved.issueDate);
           setDueDate(saved.dueDate);
           setNotes(saved.notes ?? "");
-          setPaidAmountInput(saved.paidAmountInput ?? "0");
+          setCashInput(saved.cashInput ?? saved.paidAmountInput ?? "0");
+          setUpiInput(saved.upiInput ?? "0");
           setDraftRestored(true);
         }
       } catch {
@@ -260,7 +264,8 @@ export default function NewInvoicePage() {
         issueDate,
         dueDate,
         notes,
-        paidAmountInput,
+        cashInput,
+        upiInput,
       };
 
       try {
@@ -283,7 +288,8 @@ export default function NewInvoicePage() {
     issueDate,
     dueDate,
     notes,
-    paidAmountInput,
+    cashInput,
+    upiInput,
     isLoading,
   ]);
 
@@ -309,7 +315,8 @@ export default function NewInvoicePage() {
 
     setDueDate(localDateString(d));
     setNotes("");
-    setPaidAmountInput("0");
+    setCashInput("0");
+    setUpiInput("0");
     setDraftRestored(false);
     setError(null);
   };
@@ -362,9 +369,14 @@ export default function NewInvoicePage() {
   const globalDiscountAmt = totals.discount_amount;
   const grandTotal = totals.total_amount;
 
-  const parsedPaid = parseFloat(paidAmountInput);
-  const isPaidNegative = Number.isFinite(parsedPaid) && parsedPaid < 0;
-  const paidAmount = round2(clampNumber(parsedPaid, 0));
+  const parsedCash = parseFloat(cashInput);
+  const parsedUpi = parseFloat(upiInput);
+  const isPaidNegative =
+    (Number.isFinite(parsedCash) && parsedCash < 0) ||
+    (Number.isFinite(parsedUpi) && parsedUpi < 0);
+  const cashAmount = round2(clampNumber(parsedCash, 0));
+  const upiAmount = round2(clampNumber(parsedUpi, 0));
+  const paidAmount = round2(cashAmount + upiAmount);
 
   const isPaidExceedingTotal = toPaise(paidAmount) > toPaise(grandTotal);
 
@@ -664,10 +676,15 @@ export default function NewInvoicePage() {
           p_issue_date: issueDate,
           p_due_date: dueDate,
           p_overall_discount_pct: globalDiscount,
-          p_amount_paid: isDraft ? 0 : paidAmount,
-          p_payment_method: "cash",
           p_notes: notes || null,
           p_items: itemsPayload,
+          // One payment row per method, e.g. ₹200 UPI + ₹300 Cash
+          p_payments: isDraft
+            ? []
+            : [
+                { method: "cash", amount: cashAmount },
+                { method: "upi", amount: upiAmount },
+              ].filter((p) => p.amount > 0),
         }
       );
 
@@ -675,7 +692,7 @@ export default function NewInvoicePage() {
         const rpcError = rpcErr as { code?: string; message?: string };
         throw new Error(
           rpcError.code === "PGRST202"
-            ? "The database is missing the create_invoice function. Apply the migration in supabase/migrations first."
+            ? "The database is missing the split-payment create_invoice function. Run supabase/migrations/20261117010000_split_payments.sql first."
             : rpcError.message || "Error creating invoice."
         );
       }
@@ -1455,36 +1472,49 @@ export default function NewInvoicePage() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Paid Amount (₹) *
-                    </label>
+                    <span className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Received (₹) — split between Cash and UPI if needed
+                    </span>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([
+                        ["Cash", cashInput, setCashInput],
+                        ["UPI", upiInput, setUpiInput],
+                      ] as const).map(([label, value, setValue]) => (
+                        <label key={label} className="block">
+                          <span className="block text-xs text-gray-500 dark:text-gray-400 mb-0.5">{label}</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            max={grandTotal}
+                            name={`paid_${label.toLowerCase()}`}
+                            aria-label={`${label} received`}
+                            value={value}
+                            onChange={(e) => setValue(e.target.value)}
+                            onFocus={(e) => e.target.select()}
+                            className={cn(
+                              "w-full px-3 py-2 text-base font-semibold text-right border rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2",
+                              isPaidExceedingTotal
+                                ? "border-red-500 focus:ring-red-500 text-red-600"
+                                : "border-gray-300 dark:border-gray-600 focus:ring-indigo-500 text-emerald-600 dark:text-emerald-400"
+                            )}
+                            placeholder="0.00"
+                          />
+                        </label>
+                      ))}
+                    </div>
 
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max={grandTotal}
-                      value={
-                        paidAmountInput
-                      }
-                      onChange={(e) =>
-                        setPaidAmountInput(
-                          e.target.value
-                        )
-                      }
-                      className={cn(
-                        "w-full px-3 py-2 text-base font-semibold text-right border rounded-lg dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2",
-                        isPaidExceedingTotal
-                          ? "border-red-500 focus:ring-red-500 text-red-600"
-                          : "border-gray-300 dark:border-gray-600 focus:ring-indigo-500 text-emerald-600 dark:text-emerald-400"
-                      )}
-                      placeholder="0.00"
-                    />
+                    <div className="flex justify-between items-center mt-2 text-sm">
+                      <span className="text-gray-600 dark:text-gray-400">Paid Amount</span>
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                        {formatCurrency(paidAmount)}
+                      </span>
+                    </div>
 
                     {isPaidExceedingTotal && (
                       <p className="text-xs text-red-600 dark:text-red-400 mt-1 font-medium flex items-center gap-1">
                         <AlertCircle className="w-3.5 h-3.5 inline" />
-                        Paid Amount cannot exceed Total Amount (
+                        Cash + UPI cannot exceed Total Amount (
                         {formatCurrency(
                           grandTotal
                         )}
